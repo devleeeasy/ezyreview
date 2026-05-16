@@ -132,3 +132,4 @@ ezyreview/
 - PR 대신 GitHub compare URL 출력: `https://github.com/devleeeasy/ezyreview/compare/main...<branch>`
 - 새 작업 단계 시작 전 반드시 새 브랜치 생성
 - 브랜치명 불명확할 때는 사용자에게 확인 후 생성
+- 신규 작업은 반드시 신규 브랜치 생성 후 커밋 — main 브랜치 직접 커밋 금지
