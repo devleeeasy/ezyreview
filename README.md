@@ -200,6 +200,20 @@ curl http://localhost:8000/insights/summary \
 
 API 문서: `http://localhost:8000/docs`
 
+---
+
+## 라이브 데모
+
+**Base URL:** `https://ezyreview-production.up.railway.app`
+
+```bash
+# 헬스체크
+curl https://ezyreview-production.up.railway.app/health
+
+# API 문서
+https://ezyreview-production.up.railway.app/docs
+```
+
 ```bash
 # 부하 테스트
 pip install locust

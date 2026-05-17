@@ -13,7 +13,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
-@router.post("", response_model=TenantCreateResponse, status_code=201)
+@router.post(
+    "",
+    response_model=TenantCreateResponse,
+    status_code=201,
+    summary="테넌트 등록",
+    description="쇼핑몰을 등록하고 API 키를 발급합니다. 발급된 api_key를 웹훅 URL과 인증에 사용하세요.",
+)
 async def create_tenant(
     body: TenantCreateRequest,
     db: AsyncSession = Depends(get_main_db),
