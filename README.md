@@ -173,22 +173,39 @@ SQLAlchemy `Session`을 요청 컨텍스트에서 동적으로 생성합니다. 
 ```bash
 git clone https://github.com/devleeeasy/ezyreview
 cd ezyreview
-cp .env.example .env
-docker compose up -d
+cp .env.example .env        # OPENAI_API_KEY 입력
+docker compose up -d        # api / worker / beat / db / redis 일괄 기동
 ```
 
 ```bash
-# 웹훅 테스트
-curl -X POST http://localhost:8000/webhook/test-api-key \
+# 1. 테넌트 등록 → API 키 발급
+curl -X POST http://localhost:8000/tenants \
+  -H "Content-Type: application/json" \
+  -d '{"name": "내 쇼핑몰", "plan": "basic"}'
+
+# 2. 웹훅 수신 테스트
+curl -X POST http://localhost:8000/webhook/{api_key} \
   -H "Content-Type: application/json" \
   -d '{"order_id": "ORD-001", "customer_phone": "010-1234-5678", "product_name": "테스트 상품"}'
 
-# 인사이트 조회
+# 3. JWT 발급
+curl -X POST http://localhost:8000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "{api_key}"}'
+
+# 4. 인사이트 조회
 curl http://localhost:8000/insights/summary \
-  -H "Authorization: Bearer {jwt_token}"
+  -H "X-Api-Key: {api_key}"
 ```
 
 API 문서: `http://localhost:8000/docs`
+
+```bash
+# 부하 테스트
+pip install locust
+locust -f tests/load_test.py --host http://localhost:8000
+# http://localhost:8089 에서 Locust UI 접속
+```
 
 ---
 
@@ -199,22 +216,26 @@ ezyreview/
 ├── app/
 │   ├── api/
 │   │   ├── webhook.py       # 웹훅 수신 엔드포인트
-│   │   └── insights.py      # 인사이트 API
+│   │   ├── insights.py      # 인사이트 API
+│   │   ├── auth.py          # JWT 발급 엔드포인트
+│   │   └── tenants.py       # 테넌트 등록
 │   ├── core/
 │   │   ├── db.py            # 테넌트 DB 동적 라우팅 핵심
-│   │   ├── auth.py          # API 키 / JWT 인증
+│   │   ├── auth.py          # API 키 / Redis 캐시 인증
 │   │   └── config.py
 │   ├── models/
 │   │   ├── main.py          # main_db 모델 (Tenant, WebhookLog)
-│   │   └── tenant.py        # tenant_db 모델 (Review, Order, Notification)
+│   │   └── tenant.py        # tenant_db 모델 (Order, Review, Notification, ReviewAnalytics)
 │   └── schemas/
 ├── worker/
+│   ├── celery_app.py        # Celery 설정 + beat 스케줄
 │   ├── tasks.py             # Celery 태스크 정의
-│   ├── review_request.py    # 알림 발송 로직
-│   └── analytics.py        # AI 분석 로직
+│   ├── review_request.py    # 카카오 알림톡 발송 로직
+│   └── analytics.py        # OpenAI AI 분석 로직
 ├── tests/
-│   ├── load_test.py         # Locust 부하 테스트
-│   └── test_webhook.py
+│   └── load_test.py         # Locust 부하 테스트
+├── scripts/
+│   └── seed_reviews.py      # 테스트 데이터 삽입
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -233,11 +254,27 @@ ezyreview/
 
 ---
 
-## 성능 목표
+## 성능 측정 결과
 
-| 항목 | 목표 |
-|------|------|
-| 웹훅 수신 응답 | 200ms 이하 |
-| 알림 발송 지연 | 웹훅 수신 후 30초 이내 |
-| 동시 테넌트 처리 | Celery worker 4개 기준 초당 50건 |
-| AI 분석 처리 | 배치 100건 기준 2분 이내 |
+Locust 부하 테스트 — 동시 50 users, 60초, 로컬 Docker Desktop (Windows)
+
+| 엔드포인트 | Median | p95 | p99 | 에러율 |
+|---|---|---|---|---|
+| 웹훅 수신 (신규) | 92ms | 1,000ms | 1,200ms | 0% |
+| 웹훅 수신 (중복 차단) | 56ms | 360ms | 500ms | 0% |
+| 인사이트 API | 41ms | 880ms | 1,000ms | 0% |
+| **전체 집계** | **71ms** | **920ms** | **1,100ms** | **0%** |
+
+- 처리량: **86.9 req/s** (5,075 requests / 60초)
+- p99가 높은 것은 Docker Desktop WSL2 네트워킹 오버헤드 영향
+- `GET /insights/summary` DB 쿼리 5회 → 2회 최적화 후 median 170ms → 41ms 개선
+
+**병목 개선 전후 비교**
+
+| | 개선 전 | 개선 후 |
+|---|---|---|
+| insights median | 170ms | 41ms |
+| webhook 신규 median | 210ms | 92ms |
+| 처리량 | 73.5 req/s | 86.9 req/s |
+
+**배치 AI 분석**: 리뷰 100건 기준 약 90초 이내 완료 (gpt-4o-mini 기준)
