@@ -2,13 +2,17 @@
 import logging
 import smtplib
 import zoneinfo
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from email.mime.text import MIMEText
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
-from app.core.db import get_tenant_session
+from app.core.db import _build_tenant_db_url
 from app.models.tenant import Notification, Order
 
 logger = logging.getLogger(__name__)
@@ -45,8 +49,21 @@ KST = zoneinfo.ZoneInfo("Asia/Seoul")
 # -------------------------------------------------------------------
 
 
+@asynccontextmanager
+async def _worker_session(tenant_id: int) -> AsyncGenerator[AsyncSession, None]:
+    # Celery 워커는 asyncio.run()으로 매 태스크마다 새 이벤트 루프를 생성한다.
+    # NullPool을 쓰면 루프 간 커넥션 재사용 없이 매번 새로 연결하므로 충돌이 없다.
+    engine = create_async_engine(_build_tenant_db_url(tenant_id), poolclass=NullPool)
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
+
+
 async def send_review_request(tenant_id: int, order_id: str) -> None:
-    async with get_tenant_session(tenant_id) as db:
+    async with _worker_session(tenant_id) as db:
         result = await db.execute(select(Order).where(Order.order_id == order_id))
         order = result.scalar_one_or_none()
 
@@ -88,7 +105,7 @@ ezyreview 팀 드림
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = settings.GMAIL_USER
-    msg["To"] = recipient  # 실서비스에서는 고객 이메일 주소로 변경
+    msg["To"] = recipient
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
