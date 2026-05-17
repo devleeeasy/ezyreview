@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-in-production"
     OPENAI_API_KEY: str = ""
     KAKAO_API_KEY: str = ""
+    GMAIL_USER: str = ""        # Gmail 발신 계정 (예: yourname@gmail.com)
+    GMAIL_APP_PASSWORD: str = ""  # Gmail 앱 비밀번호 (2단계 인증 후 발급)
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
