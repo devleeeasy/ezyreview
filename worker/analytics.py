@@ -1,17 +1,31 @@
 # AI 리뷰 분석 — OpenAI로 감성 분석 / 키워드 추출 / 요약 후 ReviewAnalytics 저장
 import json
 import logging
+from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
 
 from openai import AsyncOpenAI
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
-from app.core.db import get_tenant_session
+from app.core.db import _build_tenant_db_url
 from app.models.tenant import Review, ReviewAnalytics
 
 logger = logging.getLogger(__name__)
 
-_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+@asynccontextmanager
+async def _worker_session(tenant_id: int) -> AsyncGenerator[AsyncSession, None]:
+    # Celery 워커는 asyncio.run()으로 매 태스크마다 새 이벤트 루프를 생성한다.
+    # NullPool을 쓰면 루프 간 커넥션 재사용 없이 매번 새로 연결하므로 충돌이 없다.
+    engine = create_async_engine(_build_tenant_db_url(tenant_id), poolclass=NullPool)
+    try:
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 SYSTEM_PROMPT = """당신은 이커머스 리뷰 분석 AI입니다.
 주어진 리뷰를 분석하여 반드시 아래 JSON 형식으로만 응답하세요.
@@ -24,7 +38,7 @@ SYSTEM_PROMPT = """당신은 이커머스 리뷰 분석 AI입니다.
 
 
 async def analyze_review(tenant_id: int, review_id: int) -> None:
-    async with get_tenant_session(tenant_id) as db:
+    async with _worker_session(tenant_id) as db:
         result = await db.execute(select(Review).where(Review.id == review_id))
         review = result.scalar_one_or_none()
 
@@ -60,7 +74,7 @@ async def analyze_review(tenant_id: int, review_id: int) -> None:
 async def get_unanalyzed_review_ids(tenant_id: int) -> list[int]:
     """analytics 레코드가 없는 리뷰 ID 목록을 반환한다."""
     from sqlalchemy import not_
-    async with get_tenant_session(tenant_id) as db:
+    async with _worker_session(tenant_id) as db:
         analyzed_subq = select(ReviewAnalytics.review_id)
         result = await db.execute(
             select(Review.id).where(
@@ -77,8 +91,11 @@ async def _call_openai(content: str) -> tuple[str, list[str], str]:
         logger.warning("OPENAI_API_KEY not set — returning dummy analytics (dev mode)")
         return "neutral", ["테스트", "개발"], "개발 환경 더미 요약입니다."
 
+    # Celery는 asyncio.run()으로 매 태스크마다 새 이벤트 루프를 사용하므로
+    # AsyncOpenAI 클라이언트를 호출 시점에 생성해야 루프 불일치 에러가 없다.
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     try:
-        response = await _client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
