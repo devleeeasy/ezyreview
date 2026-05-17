@@ -8,8 +8,7 @@
 ![Celery](https://img.shields.io/badge/Celery-5.4-orange)
 ![Railway](https://img.shields.io/badge/Deploy-Railway-purple)
 
-**라이브 데모:** https://ezyreview-production.up.railway.app  
-**API 문서:** https://ezyreview-production.up.railway.app/docs
+**API 문서 (라이브):** https://ezyreview-production.up.railway.app/docs
 
 ---
 
@@ -25,7 +24,8 @@
 
 ## 시스템 아키텍처
 
-```
+![시스템 아키텍처](architecture.png)
+<!-- ```
 [이커머스 쇼핑몰]
       │ 주문완료 웹훅 (POST /webhook/{api_key})
       ▼
@@ -51,7 +51,7 @@
       ▼
 [GET /insights — 인사이트 API]
  감성 분포 / 평균 평점 집계
-```
+``` -->
 
 **설계 원칙**
 - 웹훅 수신과 비즈니스 로직 분리 — Celery로 위임해 API 응답 200ms 이하 유지
@@ -101,6 +101,8 @@ tenant_{id}_db       (테넌트별 완전 격리)
 ---
 
 ## 전체 데이터 흐름
+
+![데이터 흐름](flow.png)
 
 ### 1. 웹훅 수신 → 태스크 발행
 
