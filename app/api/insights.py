@@ -49,22 +49,25 @@ async def get_summary(
     tenant: Annotated[TenantData, Depends(verify_api_key)],
 ) -> SummaryResponse:
     async with get_tenant_session(tenant.id) as db:
-        total = await db.scalar(select(func.count()).select_from(Review))
-        avg_rating = await db.scalar(select(func.avg(Review.rating)))
-
-        sentiment_counts: dict[str, int] = {}
-        for s in ("positive", "negative", "neutral"):
-            count = await db.scalar(
-                select(func.count())
-                .select_from(ReviewAnalytics)
-                .where(ReviewAnalytics.sentiment == s)
-            )
-            sentiment_counts[s] = count or 0
-
-        analyzed_count = await db.scalar(
-            select(func.count()).select_from(ReviewAnalytics)
+        # 쿼리 1: 리뷰 전체 수 + 평균 평점
+        row = await db.execute(
+            select(func.count(Review.id), func.avg(Review.rating)).select_from(Review)
         )
-        unanalyzed = max((total or 0) - (analyzed_count or 0), 0)
+        total, avg_rating = row.one()
+
+        # 쿼리 2: 감성별 분포 한 번에 (GROUP BY)
+        rows = await db.execute(
+            select(ReviewAnalytics.sentiment, func.count())
+            .group_by(ReviewAnalytics.sentiment)
+        )
+        sentiment_counts: dict[str, int] = {"positive": 0, "negative": 0, "neutral": 0}
+        analyzed_count = 0
+        for sentiment, count in rows.all():
+            if sentiment in sentiment_counts:
+                sentiment_counts[sentiment] = count
+            analyzed_count += count
+
+        unanalyzed = max((total or 0) - analyzed_count, 0)
 
     return SummaryResponse(
         total_reviews=total or 0,
