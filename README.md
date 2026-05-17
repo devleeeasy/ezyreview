@@ -12,6 +12,7 @@
 
 리뷰 요청 타이밍을 놓치거나, 부정 리뷰의 패턴을 파악하지 못하거나, 수천 개의 리뷰를 수동으로 분류하는 작업이 반복됐습니다.
 
+
 이 프로젝트는 그 문제를 백엔드 관점에서 직접 설계하고 구현한 결과물입니다.
 
 ---
@@ -20,7 +21,7 @@
 
 ```
 [이커머스 쇼핑몰]
-      │ 주문완료 웹훅 (POST /webhook/{tenant_api_key})
+      │ 주문완료 웹훅 (POST /webhook/{api_key})
       ▼
 [FastAPI — 웹훅 수신 & 테넌트 인증]
       │ 테넌트 검증 → main_db 조회
@@ -61,7 +62,7 @@
 | DB | PostgreSQL | 멀티테넌트 DB 분리 운영, 트랜잭션 신뢰성 |
 | ORM | SQLAlchemy 2.0 | 동적 DB 라우팅 구현 |
 | AI 분석 | OpenAI API | 감성 분석, 키워드 추출, 리뷰 요약 |
-| 알림 | 카카오 알림톡 / SMTP | 리뷰 요청 자동 발송 |
+| 알림 | 카카오 알림톡 | 리뷰 요청 자동 발송 |
 | 인프라 | Docker Compose | 로컬 개발 환경 일관성 |
 
 ---
@@ -71,15 +72,13 @@
 ```
 main_db
 ├── tenants          (테넌트 정보, API 키, 플랜)
-├── webhook_logs     (수신 이력, 디버깅용)
-└── billing          (구독, 결제 상태)
+└── webhook_logs     (수신 이력, 디버깅용)
 
 tenant_{id}_db       (테넌트별 완전 격리)
 ├── orders           (주문 정보)
 ├── reviews          (수집된 리뷰)
 ├── notifications    (발송 이력)
-├── review_analytics (AI 분석 결과)
-└── settings         (알림 발송 설정)
+└── review_analytics (AI 분석 결과)
 ```
 
 **왜 DB 분리형을 선택했나**
@@ -99,14 +98,13 @@ tenant_{id}_db       (테넌트별 완전 격리)
 ### 1. 웹훅 수신 → 태스크 발행
 
 ```
-POST /webhook/{tenant_api_key}
+POST /webhook/{api_key}
   │
   ├── API 키 검증 (main_db 조회, Redis 캐시 활용)
   ├── 요청 중복 체크 (order_id 기준, Redis SET NX)
   ├── webhook_logs 기록
   └── Celery 태스크 발행
-        ├── review_request_task (즉시)
-        └── analytics_task (리뷰 작성 후 트리거)
+        └── review_request_task (즉시 — 알림톡 발송)
 ```
 
 ### 2. 리뷰 요청 알림 발송
@@ -114,35 +112,46 @@ POST /webhook/{tenant_api_key}
 ```
 review_request_task
   │
-  ├── 테넌트 발송 설정 조회 (발송 시점, 채널, 메시지 템플릿)
-  ├── 알림 발송 (알림톡 or 이메일)
-  ├── notifications 테이블 기록
+  ├── Gmail SMTP로 리뷰 요청 이메일 발송
+  ├── notifications 테이블 기록 (sent / failed)
   └── 실패 시 자동 재시도 (max_retries=3, exponential backoff)
 ```
 
-### 3. 리뷰 AI 분석
+### 3. 리뷰 수집
 
 ```
-analytics_task
+POST /reviews  (X-Api-Key 인증)
   │
-  ├── 신규 리뷰 수집 (쇼핑몰 API 폴링)
-  ├── OpenAI API 호출
-  │     ├── 감성 분석 (긍정 / 부정 / 중립)
-  │     ├── 키워드 추출 (상위 5개)
-  │     └── 한줄 요약
-  └── review_analytics 저장
+  ├── 주문 존재 여부 확인
+  ├── 중복 리뷰 방지
+  ├── reviews 테이블 저장
+  └── analytics_task 즉시 발행 → AI 분석 시작
 ```
 
-### 4. 인사이트 API 응답
+### 4. 리뷰 AI 분석 (Celery beat — 매일 새벽 2시 + 리뷰 등록 즉시)
+
+```
+nightly_analytics_task
+  │
+  └── batch_analytics_task (테넌트별)
+        │
+        └── analytics_task (리뷰별)
+              ├── OpenAI gpt-4o-mini 호출
+              │     ├── 감성 분석 (긍정 / 부정 / 중립)
+              │     ├── 키워드 추출 (상위 3개)
+              │     └── 한줄 요약
+              └── review_analytics 저장
+```
+
+### 5. 인사이트 API 응답
 
 ```
 GET /insights/summary
   │
-  ├── 테넌트 JWT 인증
-  ├── tenant_{id}_db 집계 쿼리
-  │     ├── 리뷰 작성률 (발송 대비 작성)
-  │     ├── 감성 분포 (기간별)
-  │     └── 상위 키워드
+  ├── X-Api-Key 헤더 인증 (Redis 캐시 → main_db fallback)
+  ├── tenant_{id}_db 집계 쿼리 (GROUP BY로 단일 쿼리 최적화)
+  │     ├── 전체 리뷰 수 + 평균 평점
+  │     └── 감성 분포 (positive / negative / neutral / unanalyzed)
   └── 응답 반환
 ```
 
@@ -198,7 +207,9 @@ curl http://localhost:8000/insights/summary \
   -H "X-Api-Key: {api_key}"
 ```
 
-API 문서: `http://localhost:8000/docs`
+API 문서 (로컬): `http://localhost:8000/docs`
+
+API 문서 (라이브): `https://ezyreview-production.up.railway.app/docs`
 
 ---
 
@@ -214,8 +225,11 @@ curl https://ezyreview-production.up.railway.app/health
 https://ezyreview-production.up.railway.app/docs
 ```
 
+---
+
+## 부하 테스트
+
 ```bash
-# 부하 테스트
 pip install locust
 locust -f tests/load_test.py --host http://localhost:8000
 # http://localhost:8089 에서 Locust UI 접속
@@ -232,7 +246,9 @@ ezyreview/
 │   │   ├── webhook.py       # 웹훅 수신 엔드포인트
 │   │   ├── insights.py      # 인사이트 API
 │   │   ├── auth.py          # JWT 발급 엔드포인트
-│   │   └── tenants.py       # 테넌트 등록
+│   │   ├── tenants.py       # 테넌트 등록
+│   │   ├── reviews.py       # 리뷰 수집 엔드포인트
+│   │   └── admin.py         # 배치 분석 수동 트리거 (운영용)
 │   ├── core/
 │   │   ├── db.py            # 테넌트 DB 동적 라우팅 핵심
 │   │   ├── auth.py          # API 키 / Redis 캐시 인증
@@ -263,8 +279,10 @@ ezyreview/
 | `DATABASE_URL` | main_db PostgreSQL URL |
 | `REDIS_URL` | Redis (Celery 브로커) |
 | `OPENAI_API_KEY` | OpenAI API 키 |
-| `KAKAO_API_KEY` | 카카오 알림톡 키 |
-| `JWT_SECRET` | 인사이트 API 인증용 |
+| `GMAIL_USER` | 리뷰 요청 발신 Gmail 주소 |
+| `GMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 (2단계 인증 후 발급) |
+| `KAKAO_API_KEY` | 카카오 알림톡 키 (실서비스 전환용, 현재 미사용) |
+| `JWT_SECRET` | JWT 서명 키 |
 
 ---
 
