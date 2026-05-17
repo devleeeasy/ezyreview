@@ -4,7 +4,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.core.auth import TenantData, verify_api_key
@@ -17,34 +17,39 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 
 
 class SentimentCount(BaseModel):
-    positive: int
-    negative: int
-    neutral: int
-    unanalyzed: int
+    positive: int = Field(description="긍정 리뷰 수")
+    negative: int = Field(description="부정 리뷰 수")
+    neutral: int = Field(description="중립 리뷰 수")
+    unanalyzed: int = Field(description="아직 AI 분석이 완료되지 않은 리뷰 수")
 
 
 class SummaryResponse(BaseModel):
-    total_reviews: int
-    avg_rating: float | None
-    sentiment: SentimentCount
+    total_reviews: int = Field(description="전체 리뷰 수")
+    avg_rating: float | None = Field(description="평균 평점 (리뷰 없으면 null)")
+    sentiment: SentimentCount = Field(description="감성 분포")
 
 
 class ReviewItem(BaseModel):
-    review_id: int
-    order_id: str
-    content: str | None
-    rating: float | None
-    sentiment: str | None
-    keywords: list[str]
-    summary: str | None
+    review_id: int = Field(description="리뷰 고유 ID")
+    order_id: str = Field(description="연결된 주문 ID")
+    content: str | None = Field(description="리뷰 내용")
+    rating: float | None = Field(description="평점 (1.0 ~ 5.0)")
+    sentiment: str | None = Field(description="AI 감성 분석 결과 — positive / negative / neutral")
+    keywords: list[str] = Field(description="AI가 추출한 핵심 키워드 목록")
+    summary: str | None = Field(description="AI가 생성한 한 줄 요약")
 
 
 class ReviewListResponse(BaseModel):
-    total: int
-    items: list[ReviewItem]
+    total: int = Field(description="필터 조건에 해당하는 전체 리뷰 수")
+    items: list[ReviewItem] = Field(description="현재 페이지 리뷰 목록")
 
 
-@router.get("/summary", response_model=SummaryResponse)
+@router.get(
+    "/summary",
+    response_model=SummaryResponse,
+    summary="리뷰 인사이트 요약",
+    description="전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석)를 반환합니다. X-Api-Key 헤더 인증 필요.",
+)
 async def get_summary(
     tenant: Annotated[TenantData, Depends(verify_api_key)],
 ) -> SummaryResponse:
@@ -81,12 +86,17 @@ async def get_summary(
     )
 
 
-@router.get("/reviews", response_model=ReviewListResponse)
+@router.get(
+    "/reviews",
+    response_model=ReviewListResponse,
+    summary="리뷰 목록 조회",
+    description="수집된 리뷰와 AI 분석 결과를 페이지네이션으로 반환합니다. sentiment 필터로 감성별 조회가 가능합니다.",
+)
 async def get_reviews(
     tenant: Annotated[TenantData, Depends(verify_api_key)],
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    sentiment: str | None = Query(default=None, pattern="^(positive|negative|neutral)$"),
+    limit: int = Query(default=20, ge=1, le=100, description="페이지당 리뷰 수 (최대 100)"),
+    offset: int = Query(default=0, ge=0, description="건너뛸 리뷰 수 (페이지네이션)"),
+    sentiment: str | None = Query(default=None, pattern="^(positive|negative|neutral)$", description="감성 필터 — positive / negative / neutral"),
 ) -> ReviewListResponse:
     async with get_tenant_session(tenant.id) as db:
         base_query = (

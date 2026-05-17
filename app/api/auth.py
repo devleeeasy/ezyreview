@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from jose import jwt
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_tenant_by_api_key
@@ -19,16 +19,21 @@ JWT_EXPIRE_HOURS = 24
 
 
 class TokenRequest(BaseModel):
-    api_key: str
+    api_key: str = Field(description="테넌트 등록 시 발급받은 API 키")
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int = JWT_EXPIRE_HOURS * 3600
+    access_token: str = Field(description="발급된 JWT 액세스 토큰")
+    token_type: str = Field(default="bearer", description="토큰 타입 (항상 bearer)")
+    expires_in: int = Field(default=JWT_EXPIRE_HOURS * 3600, description="토큰 만료 시간 (초 단위, 기본 24시간)")
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post(
+    "/token",
+    response_model=TokenResponse,
+    summary="JWT 토큰 발급",
+    description="API 키를 전달하면 24시간 유효한 JWT 액세스 토큰을 반환합니다.",
+)
 async def issue_token(
     body: TokenRequest,
     db: AsyncSession = Depends(get_main_db),

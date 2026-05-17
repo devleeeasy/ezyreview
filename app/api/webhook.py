@@ -3,8 +3,9 @@ import json
 import logging
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Annotated
 
 from app.core.auth import get_tenant_by_api_key
 from app.core.config import settings
@@ -21,9 +22,14 @@ _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 DEDUP_TTL = 86400  # 24시간
 
 
-@router.post("/webhook/{api_key}", response_model=WebhookResponse)
+@router.post(
+    "/webhook/{api_key}",
+    response_model=WebhookResponse,
+    summary="주문 완료 웹훅 수신",
+    description="이커머스 쇼핑몰의 주문 완료 이벤트를 수신합니다. 중복 order_id는 자동으로 차단되며, 리뷰 요청 알림 발송이 비동기로 처리됩니다.",
+)
 async def receive_webhook(
-    api_key: str,
+    api_key: Annotated[str, Path(description="테넌트 API 키 — 테넌트 등록 시 발급받은 값")],
     body: WebhookRequest,
     db: AsyncSession = Depends(get_main_db),
 ) -> WebhookResponse:
