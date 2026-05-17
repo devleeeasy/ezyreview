@@ -1,4 +1,4 @@
-# 리뷰 요청 알림 발송 — Gmail SMTP (카카오 알림톡 → Gmail로 전환)
+# 리뷰 요청 알림 발송 — SendGrid (Railway 배포) / Gmail SMTP (로컬) 자동 선택
 import logging
 import smtplib
 import zoneinfo
@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from email.mime.text import MIMEText
 
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -75,7 +77,7 @@ async def send_review_request(tenant_id: int, order_id: str) -> None:
         db.add(notification)
         await db.flush()
 
-        success, error = await _send_email(order.customer_phone, order.product_name)
+        success, error = await _send_notification(order.customer_phone, order.product_name)
 
         notification.status = "sent" if success else "failed"
         notification.sent_at = datetime.now(KST) if success else None
@@ -85,12 +87,20 @@ async def send_review_request(tenant_id: int, order_id: str) -> None:
         logger.info("Notification %s — tenant=%s order=%s", notification.status, tenant_id, order_id)
 
 
-async def _send_email(recipient: str, product_name: str) -> tuple[bool, str | None]:
-    # Gmail 미설정 시 개발 환경으로 간주하고 성공 처리
-    if not settings.GMAIL_USER or not settings.GMAIL_APP_PASSWORD:
-        logger.warning("GMAIL_USER/GMAIL_APP_PASSWORD not set — skipping actual send (dev mode)")
-        return True, None
+async def _send_notification(recipient: str, product_name: str) -> tuple[bool, str | None]:
+    # SendGrid 설정 시 우선 사용 (Railway 등 클라우드 환경 — SMTP 포트 차단 우회)
+    if settings.SENDGRID_API_KEY and settings.SENDGRID_FROM_EMAIL:
+        return _send_via_sendgrid(recipient, product_name)
 
+    # Gmail SMTP 폴백 (로컬 개발 환경)
+    if settings.GMAIL_USER and settings.GMAIL_APP_PASSWORD:
+        return await _send_via_gmail(recipient, product_name)
+
+    logger.warning("No email provider configured — skipping send (dev mode)")
+    return True, None
+
+
+def _send_via_sendgrid(recipient: str, product_name: str) -> tuple[bool, str | None]:
     subject = f"[ezyreview] {product_name} 구매 후기를 남겨주세요 🙏"
     body = f"""안녕하세요!
 
@@ -101,7 +111,35 @@ async def _send_email(recipient: str, product_name: str) -> tuple[bool, str | No
 감사합니다.
 ezyreview 팀 드림
 """
+    try:
+        message = Mail(
+            from_email=settings.SENDGRID_FROM_EMAIL,
+            to_emails=recipient,
+            subject=subject,
+            plain_text_content=body,
+        )
+        sg = SendGridAPIClient(settings.SENDGRID_API_KEY)
+        response = sg.send(message)
+        if response.status_code in (200, 202):
+            logger.info("SendGrid sent — to=%s status=%s", recipient, response.status_code)
+            return True, None
+        return False, f"SendGrid status: {response.status_code}"
+    except Exception as e:
+        logger.exception("SendGrid error: %s", e)
+        return False, str(e)
 
+
+async def _send_via_gmail(recipient: str, product_name: str) -> tuple[bool, str | None]:
+    subject = f"[ezyreview] {product_name} 구매 후기를 남겨주세요 🙏"
+    body = f"""안녕하세요!
+
+{product_name}을(를) 구매해 주셔서 감사합니다.
+
+소중한 리뷰를 남겨주시면 더 나은 서비스를 제공하는 데 큰 도움이 됩니다.
+
+감사합니다.
+ezyreview 팀 드림
+"""
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = settings.GMAIL_USER
@@ -111,6 +149,7 @@ ezyreview 팀 드림
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(settings.GMAIL_USER, settings.GMAIL_APP_PASSWORD)
             smtp.send_message(msg)
+        logger.info("Gmail sent — to=%s", recipient)
         return True, None
     except Exception as e:
         logger.exception("Gmail SMTP error: %s", e)

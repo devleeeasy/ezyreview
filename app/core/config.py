@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-in-production"
     OPENAI_API_KEY: str = ""
     KAKAO_API_KEY: str = ""
-    GMAIL_USER: str = ""        # Gmail 발신 계정 (예: yourname@gmail.com)
-    GMAIL_APP_PASSWORD: str = ""  # Gmail 앱 비밀번호 (2단계 인증 후 발급)
+    GMAIL_USER: str = ""          # Gmail 발신 계정 (로컬 전용)
+    GMAIL_APP_PASSWORD: str = ""  # Gmail 앱 비밀번호 (로컬 전용)
+    SENDGRID_API_KEY: str = ""    # SendGrid API 키 (Railway 배포용)
+    SENDGRID_FROM_EMAIL: str = "" # SendGrid 발신자 인증 이메일
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
