@@ -21,14 +21,14 @@ _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 DEDUP_TTL = 86400  # 24시간
 
 
-@router.post("/webhook/{tenant_api_key}", response_model=WebhookResponse)
+@router.post("/webhook/{api_key}", response_model=WebhookResponse)
 async def receive_webhook(
-    tenant_api_key: str,
+    api_key: str,
     body: WebhookRequest,
     db: AsyncSession = Depends(get_main_db),
 ) -> WebhookResponse:
     # 1) 테넌트 인증
-    tenant = await get_tenant_by_api_key(tenant_api_key, db)
+    tenant = await get_tenant_by_api_key(api_key, db)
     if not tenant:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
