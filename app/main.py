@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.auth import router as auth_router
+from app.api.insights import router as insights_router
 from app.api.tenants import router as tenants_router
 from app.api.webhook import router as webhook_router
 from app.core.db import init_main_db
@@ -25,6 +27,8 @@ app = FastAPI(title="ezyreview", version="1.0.0", lifespan=lifespan)
 
 app.include_router(tenants_router)
 app.include_router(webhook_router)
+app.include_router(auth_router)
+app.include_router(insights_router)
 
 
 @app.get("/health")

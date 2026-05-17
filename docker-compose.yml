@@ -58,5 +58,19 @@ services:
     volumes:
       - .:/app
 
+  beat:
+    build: .
+    command: celery -A worker.celery_app beat --loglevel=info
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
 volumes:
   postgres_data:
