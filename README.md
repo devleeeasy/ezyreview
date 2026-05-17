@@ -279,8 +279,8 @@ ezyreview/
 | `DATABASE_URL` | main_db PostgreSQL URL |
 | `REDIS_URL` | Redis (Celery 브로커) |
 | `OPENAI_API_KEY` | OpenAI API 키 |
-| `GMAIL_USER` | 리뷰 요청 발신 Gmail 주소 |
-| `GMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 (2단계 인증 후 발급) |
+| `GMAIL_USER` | 리뷰 요청 발신 Gmail 주소 (로컬 전용 — Railway SMTP 포트 차단) |
+| `GMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 (로컬 전용) |
 | `KAKAO_API_KEY` | 카카오 알림톡 키 (실서비스 전환용, 현재 미사용) |
 | `JWT_SECRET` | JWT 서명 키 |
 
@@ -310,3 +310,27 @@ Locust 부하 테스트 — 동시 50 users, 60초, 로컬 Docker Desktop (Windo
 | 처리량 | 73.5 req/s | 86.9 req/s |
 
 **배치 AI 분석**: 리뷰 100건 기준 약 90초 이내 완료 (gpt-4o-mini 기준)
+
+---
+
+## 트러블슈팅 기록
+
+실제 배포 과정에서 마주친 이슈와 해결 방법을 정리합니다.
+
+**1. Celery + asyncio 이벤트 루프 충돌**
+
+Celery 워커는 태스크마다 `asyncio.run()`으로 새 이벤트 루프를 생성합니다. 모듈 수준에서 캐시된 SQLAlchemy 엔진(asyncpg)과 `AsyncOpenAI` 클라이언트가 이전 루프에 바인딩된 상태로 재사용되어 `InterfaceError: another operation is in progress` 에러가 발생했습니다.
+
+→ **해결**: `NullPool` 적용으로 태스크마다 새 DB 커넥션 생성, `AsyncOpenAI` 클라이언트도 호출 시점에 생성하도록 변경
+
+**2. Railway SMTP 포트 차단**
+
+Railway를 포함한 대부분의 클라우드 플랫폼은 스팸 방지 목적으로 아웃바운드 SMTP 포트(465, 587)를 차단합니다. Gmail SMTP 설정이 로컬에서는 정상 동작하지만, Railway 배포 환경에서는 `Network is unreachable` 에러가 발생합니다.
+
+→ **해결 방향**: SMTP 대신 HTTP API 기반 메일 서비스(SendGrid 등) 사용 필요
+
+**3. Railway `$PORT` 환경변수 미확장**
+
+Railway는 `startCommand`를 exec form으로 실행하므로 `$PORT`가 리터럴 문자열로 전달됩니다. `${PORT:-8000}` 형식도 확장되지 않아 uvicorn이 포트 파싱에 실패했습니다.
+
+→ **해결**: Dockerfile CMD를 shell form으로 변경 (`CMD uvicorn ... --port ${PORT:-8000}`)
