@@ -152,7 +152,7 @@ GET /insights/summary  (Authorization: Bearer {jwt})
   ├── tenant_{id}_db 집계 (GROUP BY 단일 쿼리 최적화)
   │     ├── 전체 리뷰 수 + 평균 평점
   │     ├── 감성 분포 (positive / negative / neutral / unanalyzed)
-  │     └── 상위 10개 키워드 (PostgreSQL json_array_elements_text로 DB 내 집계)
+  │     └── 상위 3개 키워드 (PostgreSQL json_array_elements_text로 DB 내 집계)
   └── 응답 반환
 ```
 

@@ -31,7 +31,7 @@ class SummaryResponse(BaseModel):
     total_reviews: int = Field(description="전체 리뷰 수")
     avg_rating: float | None = Field(description="평균 평점 (리뷰 없으면 null)")
     sentiment: SentimentCount = Field(description="감성 분포")
-    top_keywords: list[str] = Field(description="전체 리뷰에서 가장 많이 언급된 상위 10개 키워드 (빈도 내림차순)")
+    top_keywords: list[str] = Field(description="전체 리뷰에서 가장 많이 언급된 상위 3개 키워드 (빈도 내림차순)")
 
 
 class ReviewItem(BaseModel):
@@ -59,7 +59,7 @@ class ReviewListResponse(BaseModel):
     summary="리뷰 인사이트 요약",
     description=(
         "전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석), "
-        "상위 10개 키워드를 반환합니다. "
+        "상위 3개 키워드를 반환합니다. "
         "키워드는 AI 분석 결과에서 언급 빈도 기준으로 집계됩니다. "
         "JWT Bearer 토큰 인증 필요."
     ),
@@ -98,7 +98,7 @@ async def get_summary(
                   AND keywords != 'null'
                 GROUP BY keyword
                 ORDER BY cnt DESC
-                LIMIT 10
+                LIMIT 3
             """)
         )
         top_keywords: list[str] = [row.keyword for row in keyword_rows.all()]
