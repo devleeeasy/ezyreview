@@ -1,12 +1,6 @@
-# ezyreview
+# EzyReview
 
 > 이커머스 쇼핑몰의 주문 완료 웹훅을 수신해 리뷰 요청 알림을 자동 발송하고, AI로 수집된 리뷰를 분석하는 **멀티테넌트 SaaS 백엔드**
-
-![Python](https://img.shields.io/badge/Python-3.11-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)
-![Celery](https://img.shields.io/badge/Celery-5.4-orange)
-![Railway](https://img.shields.io/badge/Deploy-Railway-purple)
 
 **API 문서 (라이브):** https://ezyreview-production.up.railway.app/docs
 
