@@ -17,6 +17,8 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 
 
 class SentimentCount(BaseModel):
+    """AI 감성 분석 결과 분포."""
+
     positive: int = Field(description="긍정 리뷰 수")
     negative: int = Field(description="부정 리뷰 수")
     neutral: int = Field(description="중립 리뷰 수")
@@ -24,12 +26,16 @@ class SentimentCount(BaseModel):
 
 
 class SummaryResponse(BaseModel):
+    """리뷰 인사이트 요약. 전체 통계와 감성 분포를 반환합니다."""
+
     total_reviews: int = Field(description="전체 리뷰 수")
     avg_rating: float | None = Field(description="평균 평점 (리뷰 없으면 null)")
     sentiment: SentimentCount = Field(description="감성 분포")
 
 
 class ReviewItem(BaseModel):
+    """리뷰 단건 정보. AI 분석이 완료되지 않은 경우 sentiment / keywords / summary는 null입니다."""
+
     review_id: int = Field(description="리뷰 고유 ID")
     order_id: str = Field(description="연결된 주문 ID")
     content: str | None = Field(description="리뷰 내용")
@@ -40,6 +46,8 @@ class ReviewItem(BaseModel):
 
 
 class ReviewListResponse(BaseModel):
+    """리뷰 목록 응답. sentiment 필터와 limit / offset 페이지네이션을 지원합니다."""
+
     total: int = Field(description="필터 조건에 해당하는 전체 리뷰 수")
     items: list[ReviewItem] = Field(description="현재 페이지 리뷰 목록")
 
