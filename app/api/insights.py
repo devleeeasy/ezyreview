@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.core.auth import TenantData, verify_jwt
 from app.core.db import get_tenant_session
@@ -26,11 +26,12 @@ class SentimentCount(BaseModel):
 
 
 class SummaryResponse(BaseModel):
-    """리뷰 인사이트 요약. 전체 통계와 감성 분포를 반환합니다."""
+    """리뷰 인사이트 요약. 전체 통계, 감성 분포, 상위 키워드를 반환합니다."""
 
     total_reviews: int = Field(description="전체 리뷰 수")
     avg_rating: float | None = Field(description="평균 평점 (리뷰 없으면 null)")
     sentiment: SentimentCount = Field(description="감성 분포")
+    top_keywords: list[str] = Field(description="전체 리뷰에서 가장 많이 언급된 상위 10개 키워드 (빈도 내림차순)")
 
 
 class ReviewItem(BaseModel):
@@ -56,7 +57,12 @@ class ReviewListResponse(BaseModel):
     "/summary",
     response_model=SummaryResponse,
     summary="리뷰 인사이트 요약",
-    description="전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석)를 반환합니다. JWT Bearer 토큰 인증 필요.",
+    description=(
+        "전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석), "
+        "상위 10개 키워드를 반환합니다. "
+        "키워드는 AI 분석 결과에서 언급 빈도 기준으로 집계됩니다. "
+        "JWT Bearer 토큰 인증 필요."
+    ),
 )
 async def get_summary(
     tenant: Annotated[TenantData, Depends(verify_jwt)],
@@ -82,6 +88,21 @@ async def get_summary(
 
         unanalyzed = max((total or 0) - analyzed_count, 0)
 
+        # 쿼리 3: 키워드 빈도 집계 — PostgreSQL json_array_elements_text()로 DB 내 언네스팅
+        keyword_rows = await db.execute(
+            text("""
+                SELECT keyword, COUNT(*) AS cnt
+                FROM review_analytics,
+                     json_array_elements_text(keywords::json) AS keyword
+                WHERE keywords IS NOT NULL
+                  AND keywords != 'null'
+                GROUP BY keyword
+                ORDER BY cnt DESC
+                LIMIT 10
+            """)
+        )
+        top_keywords: list[str] = [row.keyword for row in keyword_rows.all()]
+
     return SummaryResponse(
         total_reviews=total or 0,
         avg_rating=round(float(avg_rating), 2) if avg_rating else None,
@@ -91,6 +112,7 @@ async def get_summary(
             neutral=sentiment_counts["neutral"],
             unanalyzed=unanalyzed,
         ),
+        top_keywords=top_keywords,
     )
 
 
