@@ -20,3 +20,6 @@ Thumbs.db
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+# 내부 개발 문서
+Prompts.md
