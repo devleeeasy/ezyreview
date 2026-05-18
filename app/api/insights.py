@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.core.auth import TenantData, verify_api_key
+from app.core.auth import TenantData, verify_jwt
 from app.core.db import get_tenant_session
 from app.models.tenant import Review, ReviewAnalytics
 
@@ -17,6 +17,8 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 
 
 class SentimentCount(BaseModel):
+    """AI 감성 분석 결과 분포."""
+
     positive: int = Field(description="긍정 리뷰 수")
     negative: int = Field(description="부정 리뷰 수")
     neutral: int = Field(description="중립 리뷰 수")
@@ -24,12 +26,16 @@ class SentimentCount(BaseModel):
 
 
 class SummaryResponse(BaseModel):
+    """리뷰 인사이트 요약. 전체 통계와 감성 분포를 반환합니다."""
+
     total_reviews: int = Field(description="전체 리뷰 수")
     avg_rating: float | None = Field(description="평균 평점 (리뷰 없으면 null)")
     sentiment: SentimentCount = Field(description="감성 분포")
 
 
 class ReviewItem(BaseModel):
+    """리뷰 단건 정보. AI 분석이 완료되지 않은 경우 sentiment / keywords / summary는 null입니다."""
+
     review_id: int = Field(description="리뷰 고유 ID")
     order_id: str = Field(description="연결된 주문 ID")
     content: str | None = Field(description="리뷰 내용")
@@ -40,6 +46,8 @@ class ReviewItem(BaseModel):
 
 
 class ReviewListResponse(BaseModel):
+    """리뷰 목록 응답. sentiment 필터와 limit / offset 페이지네이션을 지원합니다."""
+
     total: int = Field(description="필터 조건에 해당하는 전체 리뷰 수")
     items: list[ReviewItem] = Field(description="현재 페이지 리뷰 목록")
 
@@ -48,10 +56,10 @@ class ReviewListResponse(BaseModel):
     "/summary",
     response_model=SummaryResponse,
     summary="리뷰 인사이트 요약",
-    description="전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석)를 반환합니다. X-Api-Key 헤더 인증 필요.",
+    description="전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석)를 반환합니다. JWT Bearer 토큰 인증 필요.",
 )
 async def get_summary(
-    tenant: Annotated[TenantData, Depends(verify_api_key)],
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
 ) -> SummaryResponse:
     async with get_tenant_session(tenant.id) as db:
         # 쿼리 1: 리뷰 전체 수 + 평균 평점
@@ -93,7 +101,7 @@ async def get_summary(
     description="수집된 리뷰와 AI 분석 결과를 페이지네이션으로 반환합니다. sentiment 필터로 감성별 조회가 가능합니다.",
 )
 async def get_reviews(
-    tenant: Annotated[TenantData, Depends(verify_api_key)],
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
     limit: int = Query(default=20, ge=1, le=100, description="페이지당 리뷰 수 (최대 100)"),
     offset: int = Query(default=0, ge=0, description="건너뛸 리뷰 수 (페이지네이션)"),
     sentiment: str | None = Query(default=None, pattern="^(positive|negative|neutral)$", description="감성 필터 — positive / negative / neutral"),

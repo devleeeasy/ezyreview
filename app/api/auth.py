@@ -19,10 +19,14 @@ JWT_EXPIRE_HOURS = 24
 
 
 class TokenRequest(BaseModel):
+    """JWT 발급 요청. 테넌트 등록 시 발급받은 API 키를 전달합니다."""
+
     api_key: str = Field(description="테넌트 등록 시 발급받은 API 키")
 
 
 class TokenResponse(BaseModel):
+    """JWT 발급 응답. access_token을 관리 API 요청 시 Authorization: Bearer 헤더에 포함하세요."""
+
     access_token: str = Field(description="발급된 JWT 액세스 토큰")
     token_type: str = Field(default="bearer", description="토큰 타입 (항상 bearer)")
     expires_in: int = Field(default=JWT_EXPIRE_HOURS * 3600, description="토큰 만료 시간 (초 단위, 기본 24시간)")
@@ -47,6 +51,9 @@ async def issue_token(
         "sub": str(tenant.id),
         "tenant_id": tenant.id,
         "tenant_name": tenant.name,
+        "api_key": tenant.api_key,
+        "plan": tenant.plan,
+        "is_active": tenant.is_active,
         "iat": now,
         "exp": now + timedelta(hours=JWT_EXPIRE_HOURS),
     }

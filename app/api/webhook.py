@@ -15,7 +15,7 @@ from app.models.tenant import Order
 from app.schemas.webhook import WebhookRequest, WebhookResponse
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["webhook"])
 
 _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
 
