@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    IS_DEVELOPMENT_MODE: bool = False  # True: 로컬 Docker Compose, False: Railway 운영
     DATABASE_URL: str
     # 미설정 시 DATABASE_URL에서 asyncpg 드라이버 제거 + 유지보수 DB로 자동 유도
     POSTGRES_MAINTENANCE_URL: str = ""

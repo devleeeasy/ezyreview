@@ -128,8 +128,9 @@ review_request_task
 ### 3. 리뷰 수집
 
 ```
-POST /reviews  (X-Api-Key 인증)
+POST /reviews  (Authorization: Bearer {jwt})
   │
+  ├── JWT 서명 검증 + 테넌트 식별 (DB 조회 없음, 페이로드에서 추출)
   ├── 주문 존재 여부 확인 (404)
   ├── 중복 리뷰 방지 (409)
   ├── reviews 테이블 저장
@@ -151,8 +152,9 @@ analytics_task (리뷰 등록 즉시 + 매일 새벽 2시 배치)
 ### 5. 인사이트 API
 
 ```
-GET /insights/summary  (X-Api-Key 인증)
+GET /insights/summary  (Authorization: Bearer {jwt})
   │
+  ├── JWT 서명 검증 + 테넌트 식별
   ├── tenant_{id}_db 집계 (GROUP BY 단일 쿼리 최적화)
   │     ├── 전체 리뷰 수 + 평균 평점
   │     └── 감성 분포 (positive / negative / neutral / unanalyzed)
@@ -235,20 +237,25 @@ curl -X POST http://localhost:8000/tenants \
   -H "Content-Type: application/json" \
   -d '{"name": "내 쇼핑몰", "plan": "basic"}'
 
-# 2. 웹훅 수신 테스트
+# 2. API 키 → JWT 토큰 발급 (관리 API 인증용)
+curl -X POST http://localhost:8000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "{api_key}"}'
+
+# 3. 웹훅 수신 테스트 (API 키 — 서버→서버 통신)
 curl -X POST http://localhost:8000/webhook/{api_key} \
   -H "Content-Type: application/json" \
   -d '{"order_id": "ORD-001", "customer_phone": "test@example.com", "product_name": "테스트 상품"}'
 
-# 3. 리뷰 등록
+# 4. 리뷰 등록 (JWT Bearer — 관리 API)
 curl -X POST http://localhost:8000/reviews \
   -H "Content-Type: application/json" \
-  -H "X-Api-Key: {api_key}" \
+  -H "Authorization: Bearer {access_token}" \
   -d '{"order_id": "ORD-001", "content": "배송 빠르고 품질 좋아요!", "rating": 5.0}'
 
-# 4. 인사이트 조회
+# 5. 인사이트 조회 (JWT Bearer — 관리 API)
 curl http://localhost:8000/insights/summary \
-  -H "X-Api-Key: {api_key}"
+  -H "Authorization: Bearer {access_token}"
 ```
 
 API 문서 (로컬): `http://localhost:8000/docs`  
@@ -270,7 +277,7 @@ ezyreview/
 │   │   └── admin.py         # 배치 분석 수동 트리거 (운영용)
 │   ├── core/
 │   │   ├── db.py            # 테넌트 DB 동적 라우팅 핵심
-│   │   ├── auth.py          # API 키 / Redis 캐시 인증
+│   │   ├── auth.py          # API 키(웹훅) / JWT Bearer(관리 API) 인증
 │   │   └── config.py        # 환경변수 설정
 │   ├── models/
 │   │   ├── main.py          # main_db 모델 (Tenant, WebhookLog)

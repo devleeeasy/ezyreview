@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
-from app.core.auth import TenantData, verify_api_key
+from app.core.auth import TenantData, verify_jwt
 from app.core.db import get_tenant_session
 from app.models.tenant import Order, Review
 from app.schemas.review import ReviewCreateRequest, ReviewCreateResponse
@@ -20,11 +20,11 @@ router = APIRouter(prefix="/reviews", tags=["reviews"])
     response_model=ReviewCreateResponse,
     status_code=201,
     summary="리뷰 등록",
-    description="고객이 작성한 리뷰를 저장하고 AI 감성 분석 태스크를 즉시 발행합니다. X-Api-Key 헤더 인증 필요.",
+    description="고객이 작성한 리뷰를 저장하고 AI 감성 분석 태스크를 즉시 발행합니다. JWT Bearer 토큰 인증 필요.",
 )
 async def create_review(
     body: ReviewCreateRequest,
-    tenant: Annotated[TenantData, Depends(verify_api_key)],
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
 ) -> ReviewCreateResponse:
     async with get_tenant_session(tenant.id) as db:
         # 주문 존재 여부 확인

@@ -1,10 +1,12 @@
-# API 키 인증 — Redis 캐시 우선 조회 후 main_db fallback
+# API 키 인증 — Redis 캐시 우선 조회 후 main_db fallback / JWT Bearer 검증
 import json
 import logging
 from typing import Annotated
 
 import redis.asyncio as aioredis
 from fastapi import Depends, Header, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,3 +68,29 @@ async def verify_api_key(
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     return tenant
+
+
+_http_bearer = HTTPBearer(auto_error=False)
+
+
+async def verify_jwt(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_http_bearer),
+) -> TenantData:
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    try:
+        payload = jwt.decode(credentials.credentials, settings.JWT_SECRET, algorithms=["HS256"])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    tenant_id = payload.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    return TenantData(
+        id=tenant_id,
+        name=payload.get("tenant_name", ""),
+        api_key=payload.get("api_key", ""),
+        plan=payload.get("plan", ""),
+        is_active=payload.get("is_active", True),
+    )

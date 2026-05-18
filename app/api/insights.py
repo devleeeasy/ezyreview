@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.core.auth import TenantData, verify_api_key
+from app.core.auth import TenantData, verify_jwt
 from app.core.db import get_tenant_session
 from app.models.tenant import Review, ReviewAnalytics
 
@@ -48,10 +48,10 @@ class ReviewListResponse(BaseModel):
     "/summary",
     response_model=SummaryResponse,
     summary="리뷰 인사이트 요약",
-    description="전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석)를 반환합니다. X-Api-Key 헤더 인증 필요.",
+    description="전체 리뷰 수, 평균 평점, 감성 분포(긍정/부정/중립/미분석)를 반환합니다. JWT Bearer 토큰 인증 필요.",
 )
 async def get_summary(
-    tenant: Annotated[TenantData, Depends(verify_api_key)],
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
 ) -> SummaryResponse:
     async with get_tenant_session(tenant.id) as db:
         # 쿼리 1: 리뷰 전체 수 + 평균 평점
@@ -93,7 +93,7 @@ async def get_summary(
     description="수집된 리뷰와 AI 분석 결과를 페이지네이션으로 반환합니다. sentiment 필터로 감성별 조회가 가능합니다.",
 )
 async def get_reviews(
-    tenant: Annotated[TenantData, Depends(verify_api_key)],
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
     limit: int = Query(default=20, ge=1, le=100, description="페이지당 리뷰 수 (최대 100)"),
     offset: int = Query(default=0, ge=0, description="건너뛸 리뷰 수 (페이지네이션)"),
     sentiment: str | None = Query(default=None, pattern="^(positive|negative|neutral)$", description="감성 필터 — positive / negative / neutral"),

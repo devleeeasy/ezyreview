@@ -1,9 +1,13 @@
 # 테스트 픽스처 — FastAPI 앱, 외부 의존성 mock, 이메일 발송 제한
+import zoneinfo
+from datetime import datetime, timedelta
+
 import pytest
 import pytest_asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from httpx import AsyncClient, ASGITransport
+from jose import jwt
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -11,6 +15,8 @@ from sqlalchemy.pool import NullPool
 from app.main import app
 from app.core.config import settings
 from app.core.db import get_main_db, _build_tenant_db_url
+
+KST = zoneinfo.ZoneInfo("Asia/Seoul")
 
 TEST_API_KEY = "test-api-key-001"
 
@@ -113,4 +119,17 @@ def mock_email(request):
 
 @pytest.fixture
 def auth_headers():
-    return {"X-Api-Key": TEST_API_KEY}
+    """reviews / insights 엔드포인트용 JWT Bearer 토큰 헤더."""
+    now = datetime.now(KST)
+    payload = {
+        "sub": "1",
+        "tenant_id": 1,
+        "tenant_name": "테스트 테넌트",
+        "api_key": TEST_API_KEY,
+        "plan": "basic",
+        "is_active": True,
+        "iat": now,
+        "exp": now + timedelta(hours=24),
+    }
+    token = jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}

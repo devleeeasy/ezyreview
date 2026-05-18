@@ -47,6 +47,9 @@ async def issue_token(
         "sub": str(tenant.id),
         "tenant_id": tenant.id,
         "tenant_name": tenant.name,
+        "api_key": tenant.api_key,
+        "plan": tenant.plan,
+        "is_active": tenant.is_active,
         "iat": now,
         "exp": now + timedelta(hours=JWT_EXPIRE_HOURS),
     }
