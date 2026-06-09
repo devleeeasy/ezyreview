@@ -45,9 +45,10 @@ async def _worker_session(tenant_id: int) -> AsyncGenerator[AsyncSession, None]:
         await engine.dispose()
 
 
-async def generate_weekly_report(tenant_id: int) -> None:
+async def generate_weekly_report(tenant_id: int, force_week_end: date | None = None) -> None:
     now = datetime.now(KST)
-    week_end: date = now.date() - timedelta(days=1)
+    # force_week_end 지정 시 해당 날짜 기준, 기본은 어제까지(전주 완성분)
+    week_end: date = force_week_end if force_week_end is not None else now.date() - timedelta(days=1)
     week_start: date = week_end - timedelta(days=6)
 
     async with _worker_session(tenant_id) as db:
