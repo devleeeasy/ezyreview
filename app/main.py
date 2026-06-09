@@ -11,7 +11,7 @@ from app.api.reviews import router as reviews_router
 from app.api.insights import router as insights_router
 from app.api.tenants import router as tenants_router
 from app.api.webhook import router as webhook_router
-from app.core.db import init_main_db
+from app.core.db import init_main_db, migrate_all_tenants
 
 logging.basicConfig(level=logging.DEBUG if settings.IS_DEVELOPMENT_MODE else logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up — initializing main_db tables")
     await init_main_db()
     logger.info("main_db ready")
+    await migrate_all_tenants()
     yield
     logger.info("Shutting down")
 

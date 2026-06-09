@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import asyncpg
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -48,7 +49,13 @@ async def create_tenant_db(tenant_id: int) -> None:
 
     engine = get_tenant_engine(tenant_id)
     async with engine.begin() as conn:
+        # create_all 전에 vector extension 등록 필수
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(TenantBase.metadata.create_all)
+        # 기존 테넌트 DB에 embedding 컬럼 추가 (create_all은 기존 테이블을 수정하지 않음)
+        await conn.execute(
+            text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+        )
     logger.info("Tables ready in %s", db_name)
 
 
@@ -69,3 +76,30 @@ async def init_main_db() -> None:
     async with _main_engine.begin() as conn:
         await conn.run_sync(MainBase.metadata.create_all)
     logger.info("main_db tables initialized")
+
+
+async def migrate_all_tenants() -> None:
+    """앱 시작 시 모든 활성 테넌트 DB에 최신 스키마를 적용한다.
+    Redis 캐시와 무관하게 매 재시작마다 실행되며, 모든 구문은 idempotent하다."""
+    from sqlalchemy import select as _select
+    from app.models.main import Tenant
+
+    async with _main_session_factory() as db:
+        result = await db.execute(_select(Tenant.id).where(Tenant.is_active == True))
+        tenant_ids = list(result.scalars().all())
+
+    for tenant_id in tenant_ids:
+        engine = get_tenant_engine(tenant_id)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                await conn.run_sync(TenantBase.metadata.create_all)
+                await conn.execute(
+                    text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+                )
+            logger.info("Schema migration applied — tenant=%s", tenant_id)
+        except Exception:
+            # DB가 아직 없는 테넌트(웹훅 미수신)는 스킵
+            logger.warning("Schema migration skipped — tenant=%s (DB not ready)", tenant_id)
+
+    logger.info("Tenant schema migration complete — %d tenants processed", len(tenant_ids))
