@@ -1,8 +1,8 @@
-# 인사이트 API — 리뷰 감성 요약, 목록 조회, 의미 기반 벡터 검색
+# 인사이트 API — 리뷰 감성 요약, 목록 조회, 의미 기반 벡터 검색, 주간 리포트
 import json
 import logging
 import random
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -13,7 +13,7 @@ from sqlalchemy import func, select, text
 from app.core.auth import TenantData, verify_jwt
 from app.core.config import settings
 from app.core.db import get_tenant_session
-from app.models.tenant import Review, ReviewAnalytics
+from app.models.tenant import Review, ReviewAnalytics, WeeklyReport
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,25 @@ class SearchResultItem(BaseModel):
     sentiment: str | None = Field(description="AI 감성 분석 결과 — positive / negative / neutral")
     similarity_score: float = Field(description="검색어와의 코사인 유사도 (0~1, 높을수록 유사)")
     created_at: datetime = Field(description="리뷰 등록 시각")
+
+
+class WeeklyReportResponse(BaseModel):
+    """주간 리뷰 요약 리포트."""
+
+    week_start: date = Field(description="리포트 대상 기간 시작일")
+    week_end: date = Field(description="리포트 대상 기간 종료일")
+    total_reviews: int = Field(description="해당 주 전체 리뷰 수")
+    avg_rating: float | None = Field(description="해당 주 평균 평점 (리뷰 없으면 null)")
+    summary: str | None = Field(description="AI 생성 전체 요약 (2-3문장)")
+    top_issues: list[str] = Field(description="AI가 추출한 주요 불만 최대 3개")
+    top_positives: list[str] = Field(description="AI가 추출한 주요 긍정 최대 3개")
+    created_at: datetime = Field(description="리포트 생성 시각")
+
+
+class NoReportResponse(BaseModel):
+    """리포트 미존재 응답."""
+
+    message: str = Field(description="안내 메시지")
 
 
 async def _embed_query(q: str) -> list[float]:
@@ -256,3 +275,62 @@ async def search_reviews(
         )
         for row in rows
     ]
+
+
+@router.get(
+    "/report",
+    response_model=WeeklyReportResponse | NoReportResponse,
+    summary="주간 리뷰 요약 리포트 조회",
+    description=(
+        "AI가 생성한 주간 리뷰 요약 리포트를 반환합니다. "
+        "week 파라미터로 특정 주의 시작일을 지정하거나, 생략하면 가장 최근 리포트를 반환합니다. "
+        "리포트가 아직 생성되지 않은 경우 404 대신 안내 메시지를 반환합니다. "
+        "JWT Bearer 토큰 인증 필요."
+    ),
+)
+async def get_weekly_report(
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
+    week: date | None = Query(
+        default=None,
+        description="조회할 주의 시작일 (YYYY-MM-DD). 생략하면 가장 최근 리포트 반환",
+    ),
+) -> WeeklyReportResponse | NoReportResponse:
+    async with get_tenant_session(tenant.id) as db:
+        if week is not None:
+            result = await db.execute(
+                select(WeeklyReport).where(
+                    WeeklyReport.tenant_id == tenant.id,
+                    WeeklyReport.week_start == week,
+                )
+            )
+        else:
+            result = await db.execute(
+                select(WeeklyReport)
+                .where(WeeklyReport.tenant_id == tenant.id)
+                .order_by(WeeklyReport.week_start.desc())
+                .limit(1)
+            )
+
+        report = result.scalar_one_or_none()
+
+    if not report:
+        return NoReportResponse(message="리포트가 아직 생성되지 않았습니다")
+
+    def _parse_json_list(value: str | None) -> list[str]:
+        if not value:
+            return []
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return []
+
+    return WeeklyReportResponse(
+        week_start=report.week_start,
+        week_end=report.week_end,
+        total_reviews=report.total_reviews,
+        avg_rating=report.avg_rating,
+        summary=report.summary,
+        top_issues=_parse_json_list(report.top_issues),
+        top_positives=_parse_json_list(report.top_positives),
+        created_at=report.created_at,
+    )

@@ -54,6 +54,39 @@ def batch_analytics_task(self, tenant_id: int) -> None:
     logger.info("batch_analytics_task — tenant=%s queued=%d", tenant_id, len(review_ids))
 
 
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+)
+def generate_weekly_report_task(self, tenant_id: int) -> None:
+    from worker.weekly_report import generate_weekly_report
+    asyncio.run(generate_weekly_report(tenant_id))
+
+
+@celery_app.task(bind=True, max_retries=1)
+def weekly_report_all_tenants_task(self) -> None:
+    """매주 월요일 오전 9시 — 모든 활성 테넌트의 주간 리포트를 병렬 생성."""
+    from celery import group
+    from sqlalchemy import select as _select
+    from app.core.db import _main_session_factory
+    from app.models.main import Tenant
+
+    async def _get_tenant_ids() -> list[int]:
+        async with _main_session_factory() as db:
+            result = await db.execute(
+                _select(Tenant.id).where(Tenant.is_active == True)
+            )
+            return list(result.scalars().all())
+
+    tenant_ids = asyncio.run(_get_tenant_ids())
+    job = group(generate_weekly_report_task.s(tid) for tid in tenant_ids)
+    job.apply_async()
+    logger.info("weekly_report_all_tenants_task — dispatched for %d tenants", len(tenant_ids))
+
+
 @celery_app.task(bind=True, max_retries=1)
 def nightly_analytics_task(self) -> None:
     """매일 새벽 2시 — 모든 활성 테넌트의 미분석 리뷰 일괄 분석 실행."""

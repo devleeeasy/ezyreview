@@ -20,5 +20,10 @@ celery_app.conf.update(
             "task": "worker.tasks.nightly_analytics_task",
             "schedule": crontab(hour=2, minute=0),
         },
+        # 매주 월요일 오전 9시(KST) 전 테넌트 주간 리포트 생성
+        "weekly-report": {
+            "task": "worker.tasks.weekly_report_all_tenants_task",
+            "schedule": crontab(hour=9, minute=0, day_of_week=1),
+        },
     },
 )
