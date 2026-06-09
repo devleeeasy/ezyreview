@@ -51,9 +51,10 @@ async def create_review(
         await db.commit()
         await db.refresh(review)
 
-    # AI 분석 태스크 즉시 발행
-    from worker.tasks import analytics_task
+    # AI 분석 + 임베딩 태스크 즉시 발행 — 두 태스크는 독립적으로 실행되어 한쪽 실패가 다른 쪽에 영향을 주지 않는다
+    from worker.tasks import analytics_task, generate_embedding_task
     analytics_task.delay(tenant.id, review.id)
+    generate_embedding_task.delay(tenant.id, review.id)
 
     logger.info("Review created — tenant=%s order=%s review_id=%s", tenant.id, body.order_id, review.id)
     return ReviewCreateResponse(

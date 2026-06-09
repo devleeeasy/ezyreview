@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import asyncpg
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -48,7 +49,13 @@ async def create_tenant_db(tenant_id: int) -> None:
 
     engine = get_tenant_engine(tenant_id)
     async with engine.begin() as conn:
+        # create_all 전에 vector extension 등록 필수
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(TenantBase.metadata.create_all)
+        # 기존 테넌트 DB에 embedding 컬럼 추가 (create_all은 기존 테이블을 수정하지 않음)
+        await conn.execute(
+            text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+        )
     logger.info("Tables ready in %s", db_name)
 
 

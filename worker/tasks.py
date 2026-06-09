@@ -31,13 +31,26 @@ def analytics_task(self, tenant_id: int, review_id: int) -> None:
     asyncio.run(analyze_review(tenant_id, review_id))
 
 
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+)
+def generate_embedding_task(self, tenant_id: int, review_id: int) -> None:
+    from worker.embedding import generate_embedding
+    asyncio.run(generate_embedding(tenant_id, review_id))
+
+
 @celery_app.task(bind=True, max_retries=1)
 def batch_analytics_task(self, tenant_id: int) -> None:
-    """미분석 리뷰를 일괄 analytics_task로 위임한다."""
+    """미분석 리뷰를 일괄 analytics_task + generate_embedding_task로 위임한다."""
     from worker.analytics import get_unanalyzed_review_ids
     review_ids = asyncio.run(get_unanalyzed_review_ids(tenant_id))
     for review_id in review_ids:
         analytics_task.delay(tenant_id, review_id)
+        generate_embedding_task.delay(tenant_id, review_id)
     logger.info("batch_analytics_task — tenant=%s queued=%d", tenant_id, len(review_ids))
 
 
