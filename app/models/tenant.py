@@ -79,6 +79,7 @@ class WeeklyReport(TenantBase):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     top_issues: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     top_positives: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    mail_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_kst
     )

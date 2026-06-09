@@ -45,7 +45,7 @@ async def _worker_session(tenant_id: int) -> AsyncGenerator[AsyncSession, None]:
         await engine.dispose()
 
 
-async def generate_weekly_report(tenant_id: int, force_week_end: date | None = None) -> None:
+async def generate_weekly_report(tenant_id: int, force_week_end: date | None = None) -> int | None:
     now = datetime.now(KST)
     # force_week_end 지정 시 해당 날짜 기준, 기본은 어제까지(전주 완성분)
     week_end: date = force_week_end if force_week_end is not None else now.date() - timedelta(days=1)
@@ -60,7 +60,7 @@ async def generate_weekly_report(tenant_id: int, force_week_end: date | None = N
         )
         if existing.scalar_one_or_none():
             logger.info("Weekly report already exists — tenant=%s week=%s", tenant_id, week_start)
-            return
+            return None
 
         week_start_dt = datetime(week_start.year, week_start.month, week_start.day, 0, 0, 0, tzinfo=KST)
         week_end_dt = datetime(week_end.year, week_end.month, week_end.day, 23, 59, 59, tzinfo=KST)
@@ -75,7 +75,7 @@ async def generate_weekly_report(tenant_id: int, force_week_end: date | None = N
 
         if not total_reviews:
             logger.info("No reviews this week — tenant=%s week=%s", tenant_id, week_start)
-            return
+            return None
 
         # 감성 레이블 포함 리뷰 본문 최대 50건
         rows = (
@@ -105,11 +105,13 @@ async def generate_weekly_report(tenant_id: int, force_week_end: date | None = N
         )
         db.add(report)
         await db.commit()
+        report_id = report.id
 
     logger.info(
         "Weekly report saved — tenant=%s week=%s total_reviews=%d",
         tenant_id, week_start, total_reviews,
     )
+    return report_id
 
 
 async def _call_openai_for_report(
