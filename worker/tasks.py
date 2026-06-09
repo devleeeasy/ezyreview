@@ -63,7 +63,21 @@ def batch_analytics_task(self, tenant_id: int) -> None:
 )
 def generate_weekly_report_task(self, tenant_id: int) -> None:
     from worker.weekly_report import generate_weekly_report
-    asyncio.run(generate_weekly_report(tenant_id))
+    report_id = asyncio.run(generate_weekly_report(tenant_id))
+    if report_id is not None:
+        send_weekly_report_email_task.delay(tenant_id, report_id)
+
+
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+)
+def send_weekly_report_email_task(self, tenant_id: int, report_id: int) -> None:
+    from worker.weekly_report_email import send_weekly_report_email
+    asyncio.run(send_weekly_report_email(tenant_id, report_id))
 
 
 @celery_app.task(bind=True, max_retries=1)

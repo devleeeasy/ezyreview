@@ -52,9 +52,12 @@ async def create_tenant_db(tenant_id: int) -> None:
         # create_all 전에 vector extension 등록 필수
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(TenantBase.metadata.create_all)
-        # 기존 테넌트 DB에 embedding 컬럼 추가 (create_all은 기존 테이블을 수정하지 않음)
+        # 기존 테넌트 DB에 신규 컬럼 추가 (create_all은 기존 테이블을 수정하지 않음)
         await conn.execute(
             text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+        )
+        await conn.execute(
+            text("ALTER TABLE weekly_reports ADD COLUMN IF NOT EXISTS mail_sent_at TIMESTAMPTZ")
         )
     logger.info("Tables ready in %s", db_name)
 
@@ -75,6 +78,9 @@ async def get_main_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_main_db() -> None:
     async with _main_engine.begin() as conn:
         await conn.run_sync(MainBase.metadata.create_all)
+        await conn.execute(
+            text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS email VARCHAR(255)")
+        )
     logger.info("main_db tables initialized")
 
 
@@ -96,6 +102,9 @@ async def migrate_all_tenants() -> None:
                 await conn.run_sync(TenantBase.metadata.create_all)
                 await conn.execute(
                     text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+                )
+                await conn.execute(
+                    text("ALTER TABLE weekly_reports ADD COLUMN IF NOT EXISTS mail_sent_at TIMESTAMPTZ")
                 )
             logger.info("Schema migration applied — tenant=%s", tenant_id)
         except Exception:

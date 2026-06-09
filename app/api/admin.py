@@ -55,7 +55,11 @@ async def generate_report(
 
     # week_end 미지정 시 오늘(KST)로 설정 — 오늘 생성된 리뷰까지 포함
     effective_week_end = week_end or datetime.now(zoneinfo.ZoneInfo("Asia/Seoul")).date()
-    await generate_weekly_report(tenant_id, force_week_end=effective_week_end)
+    report_id = await generate_weekly_report(tenant_id, force_week_end=effective_week_end)
+
+    if report_id is not None:
+        from worker.tasks import send_weekly_report_email_task
+        send_weekly_report_email_task.delay(tenant_id, report_id)
 
     return ReportTriggerResult(
         message="report generation completed",
