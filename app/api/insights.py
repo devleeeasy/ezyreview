@@ -1,13 +1,17 @@
-# 인사이트 API — 리뷰 감성 요약 및 목록 조회
+# 인사이트 API — 리뷰 감성 요약, 목록 조회, 의미 기반 벡터 검색
 import json
 import logging
+import random
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 
 from app.core.auth import TenantData, verify_jwt
+from app.core.config import settings
 from app.core.db import get_tenant_session
 from app.models.tenant import Review, ReviewAnalytics
 
@@ -51,6 +55,26 @@ class ReviewListResponse(BaseModel):
 
     total: int = Field(description="필터 조건에 해당하는 전체 리뷰 수")
     items: list[ReviewItem] = Field(description="현재 페이지 리뷰 목록")
+
+
+class SearchResultItem(BaseModel):
+    """의미 기반 검색 결과 단건."""
+
+    review_id: int = Field(description="리뷰 고유 ID")
+    content: str | None = Field(description="리뷰 내용")
+    rating: float | None = Field(description="평점 (1.0 ~ 5.0)")
+    sentiment: str | None = Field(description="AI 감성 분석 결과 — positive / negative / neutral")
+    similarity_score: float = Field(description="검색어와의 코사인 유사도 (0~1, 높을수록 유사)")
+    created_at: datetime = Field(description="리뷰 등록 시각")
+
+
+async def _embed_query(q: str) -> list[float]:
+    """검색어를 text-embedding-3-small 벡터로 변환. API 키 없으면 dev 모드 랜덤 벡터 반환."""
+    if not settings.OPENAI_API_KEY:
+        return [random.uniform(-1.0, 1.0) for _ in range(1536)]
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    response = await client.embeddings.create(model="text-embedding-3-small", input=q)
+    return response.data[0].embedding
 
 
 @router.get(
@@ -164,3 +188,71 @@ async def get_reviews(
             ))
 
     return ReviewListResponse(total=total or 0, items=items)
+
+
+@router.get(
+    "/search",
+    response_model=list[SearchResultItem],
+    summary="의미 기반 리뷰 검색",
+    description=(
+        "검색어를 OpenAI 임베딩으로 변환한 뒤 pgvector 코사인 유사도 기준으로 "
+        "유사 리뷰를 반환합니다. sentiment / 평점 필터를 함께 적용할 수 있습니다. "
+        "embedding이 생성되지 않은 리뷰는 결과에서 제외됩니다. "
+        "JWT Bearer 토큰 인증 필요."
+    ),
+)
+async def search_reviews(
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
+    q: str = Query(description="검색어"),
+    limit: int = Query(default=10, ge=1, le=50, description="반환 개수 (최대 50)"),
+    sentiment: str | None = Query(
+        default=None,
+        pattern="^(positive|negative|neutral)$",
+        description="감성 필터 — positive / negative / neutral",
+    ),
+    min_rating: float | None = Query(default=None, ge=1.0, le=5.0, description="최소 평점"),
+    max_rating: float | None = Query(default=None, ge=1.0, le=5.0, description="최대 평점"),
+) -> list[SearchResultItem]:
+    vector = await _embed_query(q)
+    vec_str = "[" + ",".join(str(x) for x in vector) + "]"
+
+    conditions = ["r.embedding IS NOT NULL"]
+    params: dict = {"vec": vec_str, "limit": limit}
+
+    if sentiment:
+        conditions.append("ra.sentiment = :sentiment")
+        params["sentiment"] = sentiment
+    if min_rating is not None:
+        conditions.append("r.rating >= :min_rating")
+        params["min_rating"] = min_rating
+    if max_rating is not None:
+        conditions.append("r.rating <= :max_rating")
+        params["max_rating"] = max_rating
+
+    where_clause = " AND ".join(conditions)
+    # f-string은 조건절 키워드만 삽입 — 실제 값은 모두 bind param으로 처리
+    sql = text(f"""
+        SELECT r.id, r.content, r.rating, ra.sentiment,
+               ROUND(CAST(1 - (r.embedding <=> CAST(:vec AS vector)) AS numeric), 3) AS similarity_score,
+               r.created_at
+        FROM reviews r
+        LEFT JOIN review_analytics ra ON r.id = ra.review_id
+        WHERE {where_clause}
+        ORDER BY r.embedding <=> CAST(:vec AS vector)
+        LIMIT :limit
+    """)
+
+    async with get_tenant_session(tenant.id) as db:
+        rows = (await db.execute(sql, params)).all()
+
+    return [
+        SearchResultItem(
+            review_id=row.id,
+            content=row.content,
+            rating=row.rating,
+            sentiment=row.sentiment,
+            similarity_score=float(row.similarity_score),
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
