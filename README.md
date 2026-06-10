@@ -18,7 +18,7 @@
 
 ## 시스템 아키텍처
 
-![시스템 아키텍처](architecture.png)
+![시스템 아키텍처](docs/images/architecture.png)
 <!-- ```
 [이커머스 쇼핑몰]
       │ 주문완료 웹훅 (POST /webhook/{api_key})
@@ -99,7 +99,7 @@ tenant_{id}_db       (테넌트별 완전 격리)
 
 ## 전체 데이터 흐름
 
-![데이터 흐름](flow.png)
+![데이터 흐름](docs/images/flow.png)
 
 ### 1. 웹훅 수신 → 태스크 발행
 
