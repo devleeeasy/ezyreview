@@ -153,9 +153,9 @@ analytics_task (리뷰 등록 즉시 + 매일 새벽 2시 배치)
 GET /insights/summary  (Authorization: Bearer {jwt})
   │
   ├── JWT 서명 검증 + 테넌트 식별
-  ├── tenant_{id}_db 집계 (GROUP BY 단일 쿼리 최적화)
-  │     ├── 전체 리뷰 수 + 평균 평점
-  │     ├── 감성 분포 (positive / negative / neutral / unanalyzed)
+  ├── tenant_{id}_db 집계 (3개 쿼리, GROUP BY 최적화)
+  │     ├── 전체 리뷰 수 + 평균 평점 (단일 쿼리)
+  │     ├── 감성 분포 (positive / negative / neutral / unanalyzed — GROUP BY 단일 쿼리)
   │     └── 상위 3개 키워드 (PostgreSQL json_array_elements_text로 DB 내 집계)
   └── 응답 반환
 ```
@@ -246,7 +246,7 @@ Locust 부하 테스트 — 동시 50 users, 60초, 로컬 Docker Desktop (Windo
 
 - 처리량: **86.9 req/s** (5,075 requests / 60초)
 - p99가 높은 것은 Docker Desktop WSL2 네트워킹 오버헤드 영향
-- `GET /insights/summary`: DB 쿼리 5회 → GROUP BY 단일 쿼리로 최적화, median 170ms → 41ms
+- `GET /insights/summary`: DB 쿼리 5회 → 3개 쿼리로 최적화 (감성 분포 GROUP BY 통합, 키워드 DB 내 집계), median 170ms → 41ms
 
 **배치 AI 분석**: 리뷰 100건 기준 약 90초 이내 완료 (gpt-4o-mini 기준)
 
