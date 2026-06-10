@@ -10,7 +10,7 @@
 
 실무에서 멀티테넌트 구조와 Celery 기반 비동기 처리를 직접 다뤄본 경험이 있습니다.
 
-그 경험을 바탕으로, 요즘 빠르게 실용화되고 있는 **LLM 연동**까지 직접 설계하고 구현해보고 싶었습니다. 단순한 CRUD가 아닌 — 멀티테넌시, 비동기 파이프라인, AI 분석을 하나의 서비스로 연결하는 구조를 스스로 만들어보는 것이 목표였습니다.
+그 경험을 바탕으로, 요즘 빠르게 실용화되고 있는 **LLM 연동**까지 직접 설계하고 구현해보고 싶었습니다. 단순한 CRUD가 아닌 멀티테넌시, 비동기 파이프라인, AI 분석을 하나의 서비스로 연결하는 구조를 스스로 만들어보는 것이 목표였습니다.
 
 도메인으로 이커머스 리뷰를 선택한 건, 리뷰 수집·분석 자동화가 실제 서비스로 존재하고 비즈니스 가치가 명확한 문제이기 때문입니다.
 
@@ -18,7 +18,7 @@
 
 ## 시스템 아키텍처
 
-![시스템 아키텍처](architecture.png)
+![시스템 아키텍처](docs/images/architecture.png)
 <!-- ```
 [이커머스 쇼핑몰]
       │ 주문완료 웹훅 (POST /webhook/{api_key})
@@ -42,15 +42,16 @@
       ▼
 [POST /reviews — 리뷰 수집]
       │ analytics_task 즉시 발행
+      │ generate_embedding_task 즉시 발행
       ▼
 [GET /insights — 인사이트 API]
- 감성 분포 / 평균 평점 집계
+ 감성 분포 / 평균 평점 / 벡터 검색 / 주간 리포트
 ``` -->
 
 **설계 원칙**
-- 웹훅 수신과 비즈니스 로직 분리 — Celery로 위임해 API 응답 200ms 이하 유지
-- 테넌트별 완전 격리 DB — 구조적으로 데이터 혼용 불가
-- AI 분석 비동기 처리 — 리뷰 요청 발송 지연 없음
+- 웹훅 수신과 비즈니스 로직 분리 - Celery로 위임해 API 응답 200ms 이하 유지
+- 테넌트별 완전 격리 DB - 구조적으로 데이터 혼용 불가
+- AI 분석 비동기 처리 - 리뷰 요청 발송 지연 없음
 
 ---
 
@@ -60,10 +61,11 @@
 |------|------|-----------|
 | API 서버 | FastAPI | 비동기 처리, 타입 안정성, Pydantic 스키마 검증 |
 | 태스크 큐 | Celery + Redis | 웹훅 수신과 처리 분리, 재시도 전략 내장 |
-| DB | PostgreSQL | 멀티테넌트 DB 분리 운영, 트랜잭션 신뢰성 |
+| DB | PostgreSQL + pgvector | 멀티테넌트 DB 분리 운영, 트랜잭션 신뢰성, 벡터 유사도 검색 |
 | ORM | SQLAlchemy 2.0 (async) | 동적 DB 라우팅 구현 |
-| AI 분석 | OpenAI gpt-4o-mini | 감성 분석, 키워드 추출, 한줄 요약 |
-| 이메일 알림 | SendGrid | 클라우드 환경 SMTP 포트 차단 우회 (HTTP API) |
+| AI 분석 | OpenAI gpt-4o-mini | 감성 분석, 키워드 추출, 한줄 요약, 주간 리포트 생성 |
+| 벡터 임베딩 | OpenAI text-embedding-3-small | 리뷰 의미 검색용 1536차원 벡터 생성 |
+| 이메일 알림 | SendGrid | 리뷰 요청 알림 및 주간 리포트 발송 (SMTP 포트 차단 우회) |
 | 인프라 | Docker Compose + Railway | 로컬 개발 일관성, 클라우드 배포 |
 
 ---
@@ -72,14 +74,15 @@
 
 ```
 main_db
-├── tenants          (테넌트 정보, API 키, 플랜)
+├── tenants          (테넌트 정보, API 키, 이메일, 플랜)
 └── webhook_logs     (수신 이력, 디버깅용)
 
 tenant_{id}_db       (테넌트별 완전 격리)
 ├── orders           (주문 정보)
-├── reviews          (수집된 리뷰)
+├── reviews          (수집된 리뷰 + embedding vector(1536))
 ├── notifications    (발송 이력)
-└── review_analytics (AI 분석 결과)
+├── review_analytics (AI 분석 결과)
+└── weekly_reports   (주간 리포트 + 이메일 발송 이력)
 ```
 
 **왜 DB 분리형을 선택했나**
@@ -96,7 +99,7 @@ tenant_{id}_db       (테넌트별 완전 격리)
 
 ## 전체 데이터 흐름
 
-![데이터 흐름](flow.png)
+![데이터 흐름](docs/images/flow.png)
 
 ### 1. 웹훅 수신 → 태스크 발행
 
@@ -128,7 +131,8 @@ POST /reviews  (Authorization: Bearer {jwt})
   ├── 주문 존재 여부 확인 (404)
   ├── 중복 리뷰 방지 (409)
   ├── reviews 테이블 저장
-  └── analytics_task 즉시 발행
+  ├── analytics_task 즉시 발행
+  └── generate_embedding_task 즉시 발행
 ```
 
 ### 4. 리뷰 AI 분석
@@ -156,6 +160,45 @@ GET /insights/summary  (Authorization: Bearer {jwt})
   └── 응답 반환
 ```
 
+### 6. 리뷰 임베딩 생성
+
+```
+generate_embedding_task (리뷰 등록 즉시)
+  │
+  ├── OpenAI text-embedding-3-small 호출 (1536차원 벡터)
+  └── reviews.embedding 컬럼 업데이트
+```
+
+### 7. 의미 기반 리뷰 검색
+
+```
+GET /insights/search?q=배송이 느려요
+  │
+  ├── 검색어 → text-embedding-3-small 임베딩
+  ├── pgvector 코사인 유사도 검색 (reviews.embedding <=> query_vector)
+  ├── sentiment / 평점 범위 필터 선택 적용
+  └── 유사도 높은 리뷰 최대 50건 반환
+```
+
+### 8. 주간 리포트 생성 및 발송
+
+```
+Celery Beat (매주 월요일 오전 9시 KST)
+  │
+  ├── 전체 active 테넌트 조회
+  └── generate_weekly_report_task.group() 병렬 실행
+        │
+        ├── 7일치 reviews + review_analytics 집계
+        │     (total_reviews, avg_rating, 감성 레이블 포함 본문 최대 50건)
+        ├── OpenAI gpt-4o-mini로 요약 / 주요 불만 / 주요 긍정 추출
+        ├── weekly_reports 저장
+        └── send_weekly_report_email_task 체이닝
+              ├── SendGrid HTML 이메일 발송
+              └── mail_sent_at 업데이트
+```
+
+![주간 리포트 이메일 예시](docs/images/weekly_report_email.png)
+
 ---
 
 ## 주요 설계 포인트
@@ -175,6 +218,18 @@ API 키 → 테넌트 ID 추출 → 해당 테넌트 DB 커넥션 반환. SQLAlc
 **4. AI 분석 비용 최적화**
 
 리뷰 등록 즉시 분석 태스크를 발행하되, 분석 완료 여부를 사전 확인해 중복 호출을 방지합니다. Celery beat로 미분석 리뷰를 일 배치 처리해 누락 없이 커버합니다.
+
+**5. pgvector를 Elasticsearch 대신 선택한 이유**
+
+멀티테넌트 DB 분리 구조에서 테넌트마다 ES 인덱스를 관리하면 운영 복잡도가 급격히 올라갑니다. pgvector를 선택하면 PostgreSQL 단일 스택 유지로 트랜잭션, 백업, 모니터링을 한 곳에서 관리할 수 있습니다. 이커머스 리뷰 규모에서는 ES의 분산 처리 성능이 필요하지 않다고 판단했습니다.
+
+**6. 임베딩 생성을 비동기로 처리한 이유**
+
+임베딩 생성은 리뷰 등록 API 응답 시간에 영향을 줘서는 안 됩니다. 또한 `analytics_task`와 독립적으로 실패/재시도가 가능해야 합니다. `embedding`이 `null`인 상태에서도 감성 분석 등 기존 기능은 정상 동작하도록 설계해, 임베딩 실패가 전체 파이프라인을 막지 않습니다.
+
+**7. 주간 리포트를 온디맨드가 아닌 배치로 생성한 이유**
+
+매 요청마다 OpenAI를 호출하면 비용과 지연이 문제가 됩니다. 리포트 특성상 실시간성보다 정합성이 중요하므로, 전체 테넌트를 Celery group으로 병렬 처리하는 배치 방식이 적합합니다. 생성 완료 후 SendGrid 이메일 자동 발송으로 관리자가 대시보드에 접속하지 않아도 매주 인사이트를 받을 수 있습니다.
 
 ---
 
@@ -227,10 +282,10 @@ docker compose up -d   # api / worker / beat / db / redis 일괄 기동
 ```
 
 ```bash
-# 1. 테넌트 등록 → API 키 발급
+# 1. 테넌트 등록 → API 키 발급 (email: 주간 리포트 수신 주소)
 curl -X POST http://localhost:8000/tenants \
   -H "Content-Type: application/json" \
-  -d '{"name": "내 쇼핑몰", "plan": "basic"}'
+  -d '{"name": "내 쇼핑몰", "email": "admin@example.com", "plan": "basic"}'
 
 # 2. API 키 → JWT 토큰 발급 (관리 API 인증용)
 curl -X POST http://localhost:8000/auth/token \
@@ -248,8 +303,20 @@ curl -X POST http://localhost:8000/reviews \
   -H "Authorization: Bearer {access_token}" \
   -d '{"order_id": "ORD-001", "content": "배송 빠르고 품질 좋아요!", "rating": 5.0}'
 
-# 5. 인사이트 조회 (JWT Bearer — 관리 API)
+# 5. 인사이트 요약 조회
 curl http://localhost:8000/insights/summary \
+  -H "Authorization: Bearer {access_token}"
+
+# 6. 의미 기반 리뷰 검색 (pgvector 코사인 유사도)
+curl "http://localhost:8000/insights/search?q=배송이+느려요&sentiment=negative&limit=5" \
+  -H "Authorization: Bearer {access_token}"
+
+# 7. 주간 리포트 수동 생성 (오늘 기준, 이메일 자동 발송 포함)
+curl -X POST http://localhost:8000/admin/generate-report/1 \
+  -H "Authorization: Bearer {access_token}"
+
+# 8. 주간 리포트 조회
+curl http://localhost:8000/insights/report \
   -H "Authorization: Bearer {access_token}"
 ```
 
@@ -266,7 +333,7 @@ ezyreview/
 │   ├── api/
 │   │   ├── webhook.py       # 웹훅 수신 엔드포인트
 │   │   ├── reviews.py       # 리뷰 수집 엔드포인트
-│   │   ├── insights.py      # 인사이트 API
+│   │   ├── insights.py      # 인사이트 API (요약 / 목록 / 벡터 검색 / 주간 리포트)
 │   │   ├── auth.py          # JWT 발급 엔드포인트
 │   │   ├── tenants.py       # 테넌트 등록
 │   │   └── admin.py         # 배치 분석 수동 트리거 (운영용)
@@ -276,13 +343,16 @@ ezyreview/
 │   │   └── config.py        # 환경변수 설정
 │   ├── models/
 │   │   ├── main.py          # main_db 모델 (Tenant, WebhookLog)
-│   │   └── tenant.py        # tenant_db 모델 (Order, Review, Notification, ReviewAnalytics)
+│   │   └── tenant.py        # tenant_db 모델 (Order, Review, Notification, ReviewAnalytics, WeeklyReport)
 │   └── schemas/             # 요청/응답 스키마 (Pydantic v2)
 ├── worker/
 │   ├── celery_app.py        # Celery 설정 + beat 스케줄
 │   ├── tasks.py             # Celery 태스크 정의
-│   ├── review_request.py    # SendGrid 이메일 발송
-│   └── analytics.py        # OpenAI AI 분석
+│   ├── review_request.py    # SendGrid 리뷰 요청 이메일
+│   ├── analytics.py         # OpenAI 감성 분석 / 키워드 추출
+│   ├── embedding.py         # text-embedding-3-small 벡터 생성
+│   ├── weekly_report.py     # 주간 리포트 생성 (OpenAI 요약)
+│   └── weekly_report_email.py  # 주간 리포트 SendGrid HTML 발송
 ├── tests/
 │   ├── conftest.py          # 픽스처 (NullPool DB, Redis mock, 이메일 제한)
 │   ├── test_webhook.py
@@ -291,7 +361,8 @@ ezyreview/
 │   ├── test_insights.py
 │   └── load_test.py         # Locust 부하 테스트
 ├── scripts/
-│   └── seed_reviews.py      # 테스트 데이터 삽입
+│   ├── seed_reviews.py             # 테스트 리뷰 데이터 삽입
+│   └── seed_embedding_reviews.py   # 임베딩 포함 리뷰 시드 데이터 삽입
 ├── docker-compose.yml
 └── .env.example
 ```
