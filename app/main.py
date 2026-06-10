@@ -43,7 +43,9 @@ AI로 리뷰를 분석하는 **멀티테넌트 SaaS 백엔드**입니다.
 - **멀티테넌시**: 테넌트별 독립 DB(`tenant_{id}_db`) 자동 생성 및 완전 격리
 - **인증**: API 키(웹훅 서버→서버) + JWT Bearer(리뷰·인사이트 관리 API) 용도별 이중 인증
 - **웹훅 수신**: 주문 완료 이벤트 수신 → 중복 차단(Redis) → 리뷰 요청 알림 비동기 발송
-- **AI 인사이트**: OpenAI로 리뷰 감성 분석 → 주간/월간 인사이트 제공
+- **AI 인사이트 (NLU)**: OpenAI 기반 자연어 처리로 리뷰 감성(긍정/부정/중립)을 분석하고 핵심 이슈·강점을 추출
+- **의미 기반 검색**: pgvector 코사인 유사도로 리뷰를 벡터화해 자연어 쿼리로 유사 리뷰를 찾는 클라우드 기반 시맨틱 서치
+- **주간 리포트**: 비정형 리뷰 텍스트를 AI로 요약·분석한 주간 인사이트 리포트 자동 생성 및 이메일 발송
 """
 
 _TAGS: list[dict] = [
@@ -51,8 +53,8 @@ _TAGS: list[dict] = [
     {"name": "auth", "description": "테넌트 로그인 및 JWT 토큰 발급"},
     {"name": "webhook", "description": "주문 완료 웹훅 수신 — 테넌트 인증 후 리뷰 요청 알림 발송"},
     {"name": "reviews", "description": "리뷰 목록 조회 및 상세 확인"},
-    {"name": "insights", "description": "AI 기반 리뷰 감성 분석 및 인사이트 리포트"},
-    {"name": "admin", "description": "내부 운영용 — 미분석 리뷰 일괄 분석 배치 수동 트리거"},
+    {"name": "insights", "description": "AI 기반 리뷰 감성 분석, pgvector 의미 검색, 주간 리뷰 요약 리포트"},
+    {"name": "admin", "description": "내부 운영용 — 리뷰 배치 분석 및 주간 리포트 수동 생성 트리거"},
 ]
 
 app = FastAPI(
