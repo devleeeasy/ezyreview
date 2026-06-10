@@ -1,8 +1,9 @@
 # tenant_db 모델 — 테넌트별 격리 DB (주문·리뷰·알림·AI 분석)
 import zoneinfo
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 KST = zoneinfo.ZoneInfo("Asia/Seoul")
@@ -36,6 +37,7 @@ class Review(TenantBase):
     order_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_kst
     )
@@ -60,6 +62,24 @@ class ReviewAnalytics(TenantBase):
     sentiment: Mapped[str | None] = mapped_column(String(20), nullable=True)  # positive/negative/neutral
     keywords: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_kst
+    )
+
+
+class WeeklyReport(TenantBase):
+    __tablename__ = "weekly_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    week_end: Mapped[date] = mapped_column(Date, nullable=False)
+    total_reviews: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    top_issues: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    top_positives: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    mail_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_kst
     )

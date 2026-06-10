@@ -26,7 +26,7 @@ async def create_tenant(
 ) -> TenantCreateResponse:
     api_key = secrets.token_urlsafe(32)
 
-    tenant = Tenant(name=body.name, api_key=api_key, plan=body.plan)
+    tenant = Tenant(name=body.name, email=body.email, api_key=api_key, plan=body.plan)
     db.add(tenant)
     await db.commit()
     await db.refresh(tenant)
@@ -36,6 +36,7 @@ async def create_tenant(
     return TenantCreateResponse(
         id=tenant.id,
         name=tenant.name,
+        email=tenant.email,
         api_key=tenant.api_key,
         plan=tenant.plan,
         created_at=tenant.created_at,

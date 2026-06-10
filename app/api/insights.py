@@ -1,15 +1,19 @@
-# 인사이트 API — 리뷰 감성 요약 및 목록 조회
+# 인사이트 API — 리뷰 감성 요약, 목록 조회, 의미 기반 벡터 검색, 주간 리포트
 import json
 import logging
+import random
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 
 from app.core.auth import TenantData, verify_jwt
+from app.core.config import settings
 from app.core.db import get_tenant_session
-from app.models.tenant import Review, ReviewAnalytics
+from app.models.tenant import Review, ReviewAnalytics, WeeklyReport
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,45 @@ class ReviewListResponse(BaseModel):
 
     total: int = Field(description="필터 조건에 해당하는 전체 리뷰 수")
     items: list[ReviewItem] = Field(description="현재 페이지 리뷰 목록")
+
+
+class SearchResultItem(BaseModel):
+    """의미 기반 검색 결과 단건."""
+
+    review_id: int = Field(description="리뷰 고유 ID")
+    content: str | None = Field(description="리뷰 내용")
+    rating: float | None = Field(description="평점 (1.0 ~ 5.0)")
+    sentiment: str | None = Field(description="AI 감성 분석 결과 — positive / negative / neutral")
+    similarity_score: float = Field(description="검색어와의 코사인 유사도 (0~1, 높을수록 유사)")
+    created_at: datetime = Field(description="리뷰 등록 시각")
+
+
+class WeeklyReportResponse(BaseModel):
+    """주간 리뷰 요약 리포트."""
+
+    week_start: date = Field(description="리포트 대상 기간 시작일")
+    week_end: date = Field(description="리포트 대상 기간 종료일")
+    total_reviews: int = Field(description="해당 주 전체 리뷰 수")
+    avg_rating: float | None = Field(description="해당 주 평균 평점 (리뷰 없으면 null)")
+    summary: str | None = Field(description="AI 생성 전체 요약 (2-3문장)")
+    top_issues: list[str] = Field(description="AI가 추출한 주요 불만 최대 3개")
+    top_positives: list[str] = Field(description="AI가 추출한 주요 긍정 최대 3개")
+    created_at: datetime = Field(description="리포트 생성 시각")
+
+
+class NoReportResponse(BaseModel):
+    """리포트 미존재 응답."""
+
+    message: str = Field(description="안내 메시지")
+
+
+async def _embed_query(q: str) -> list[float]:
+    """검색어를 text-embedding-3-small 벡터로 변환. API 키 없으면 dev 모드 랜덤 벡터 반환."""
+    if not settings.OPENAI_API_KEY:
+        return [random.uniform(-1.0, 1.0) for _ in range(1536)]
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    response = await client.embeddings.create(model="text-embedding-3-small", input=q)
+    return response.data[0].embedding
 
 
 @router.get(
@@ -164,3 +207,130 @@ async def get_reviews(
             ))
 
     return ReviewListResponse(total=total or 0, items=items)
+
+
+@router.get(
+    "/search",
+    response_model=list[SearchResultItem],
+    summary="의미 기반 리뷰 검색",
+    description=(
+        "검색어를 OpenAI 임베딩으로 변환한 뒤 pgvector 코사인 유사도 기준으로 "
+        "유사 리뷰를 반환합니다. sentiment / 평점 필터를 함께 적용할 수 있습니다. "
+        "embedding이 생성되지 않은 리뷰는 결과에서 제외됩니다. "
+        "JWT Bearer 토큰 인증 필요."
+    ),
+)
+async def search_reviews(
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
+    q: str = Query(description="검색어"),
+    limit: int = Query(default=10, ge=1, le=50, description="반환 개수 (최대 50)"),
+    sentiment: str | None = Query(
+        default=None,
+        pattern="^(positive|negative|neutral)$",
+        description="감성 필터 — positive / negative / neutral",
+    ),
+    min_rating: float | None = Query(default=None, ge=1.0, le=5.0, description="최소 평점"),
+    max_rating: float | None = Query(default=None, ge=1.0, le=5.0, description="최대 평점"),
+) -> list[SearchResultItem]:
+    vector = await _embed_query(q)
+    vec_str = "[" + ",".join(str(x) for x in vector) + "]"
+
+    conditions = ["r.embedding IS NOT NULL"]
+    params: dict = {"vec": vec_str, "limit": limit}
+
+    if sentiment:
+        conditions.append("ra.sentiment = :sentiment")
+        params["sentiment"] = sentiment
+    if min_rating is not None:
+        conditions.append("r.rating >= :min_rating")
+        params["min_rating"] = min_rating
+    if max_rating is not None:
+        conditions.append("r.rating <= :max_rating")
+        params["max_rating"] = max_rating
+
+    where_clause = " AND ".join(conditions)
+    # f-string은 조건절 키워드만 삽입 — 실제 값은 모두 bind param으로 처리
+    sql = text(f"""
+        SELECT r.id, r.content, r.rating, ra.sentiment,
+               ROUND(CAST(1 - (r.embedding <=> CAST(:vec AS vector)) AS numeric), 3) AS similarity_score,
+               r.created_at
+        FROM reviews r
+        LEFT JOIN review_analytics ra ON r.id = ra.review_id
+        WHERE {where_clause}
+        ORDER BY r.embedding <=> CAST(:vec AS vector)
+        LIMIT :limit
+    """)
+
+    async with get_tenant_session(tenant.id) as db:
+        rows = (await db.execute(sql, params)).all()
+
+    return [
+        SearchResultItem(
+            review_id=row.id,
+            content=row.content,
+            rating=row.rating,
+            sentiment=row.sentiment,
+            similarity_score=float(row.similarity_score),
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get(
+    "/report",
+    response_model=WeeklyReportResponse | NoReportResponse,
+    summary="주간 리뷰 요약 리포트 조회",
+    description=(
+        "AI가 생성한 주간 리뷰 요약 리포트를 반환합니다. "
+        "week 파라미터로 특정 주의 시작일을 지정하거나, 생략하면 가장 최근 리포트를 반환합니다. "
+        "리포트가 아직 생성되지 않은 경우 404 대신 안내 메시지를 반환합니다. "
+        "JWT Bearer 토큰 인증 필요."
+    ),
+)
+async def get_weekly_report(
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
+    week: date | None = Query(
+        default=None,
+        description="조회할 주의 시작일 (YYYY-MM-DD). 생략하면 가장 최근 리포트 반환",
+    ),
+) -> WeeklyReportResponse | NoReportResponse:
+    async with get_tenant_session(tenant.id) as db:
+        if week is not None:
+            result = await db.execute(
+                select(WeeklyReport).where(
+                    WeeklyReport.tenant_id == tenant.id,
+                    WeeklyReport.week_start == week,
+                )
+            )
+        else:
+            result = await db.execute(
+                select(WeeklyReport)
+                .where(WeeklyReport.tenant_id == tenant.id)
+                .order_by(WeeklyReport.week_start.desc())
+                .limit(1)
+            )
+
+        report = result.scalar_one_or_none()
+
+    if not report:
+        return NoReportResponse(message="리포트가 아직 생성되지 않았습니다")
+
+    def _parse_json_list(value: str | None) -> list[str]:
+        if not value:
+            return []
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return []
+
+    return WeeklyReportResponse(
+        week_start=report.week_start,
+        week_end=report.week_end,
+        total_reviews=report.total_reviews,
+        avg_rating=report.avg_rating,
+        summary=report.summary,
+        top_issues=_parse_json_list(report.top_issues),
+        top_positives=_parse_json_list(report.top_positives),
+        created_at=report.created_at,
+    )

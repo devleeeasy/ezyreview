@@ -15,7 +15,7 @@ services:
       - .:/app
 
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ezyreview
       POSTGRES_PASSWORD: ezyreview
