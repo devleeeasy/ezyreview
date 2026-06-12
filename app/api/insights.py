@@ -13,7 +13,7 @@ from sqlalchemy import func, select, text
 from app.core.auth import TenantData, verify_jwt
 from app.core.config import settings
 from app.core.db import get_tenant_session
-from app.models.tenant import Review, ReviewAnalytics, WeeklyReport
+from app.models.tenant import KST, Review, ReviewAnalytics, WeeklyReport
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ async def search_reviews(
             rating=row.rating,
             sentiment=row.sentiment,
             similarity_score=float(row.similarity_score),
-            created_at=row.created_at,
+            created_at=row.created_at.astimezone(KST),
         )
         for row in rows
     ]
@@ -332,5 +332,5 @@ async def get_weekly_report(
         summary=report.summary,
         top_issues=_parse_json_list(report.top_issues),
         top_positives=_parse_json_list(report.top_positives),
-        created_at=report.created_at,
+        created_at=report.created_at.astimezone(KST),
     )

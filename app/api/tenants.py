@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_main_db
-from app.models.main import Tenant
+from app.models.main import KST, Tenant
 from app.schemas.tenant import TenantCreateRequest, TenantCreateResponse
 
 logger = logging.getLogger(__name__)
@@ -39,5 +39,5 @@ async def create_tenant(
         email=tenant.email,
         api_key=tenant.api_key,
         plan=tenant.plan,
-        created_at=tenant.created_at,
+        created_at=tenant.created_at.astimezone(KST),
     )
