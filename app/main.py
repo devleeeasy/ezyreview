@@ -54,7 +54,7 @@ _TAGS: list[dict] = [
     {"name": "webhook", "description": "주문 완료 웹훅 수신 — 테넌트 인증 후 리뷰 요청 알림 발송"},
     {"name": "reviews", "description": "리뷰 목록 조회 및 상세 확인"},
     {"name": "insights", "description": "AI 기반 리뷰 감성 분석, pgvector 의미 검색, 주간 리뷰 요약 리포트"},
-    {"name": "admin", "description": "내부 운영용 — 리뷰 배치 분석 및 주간 리포트 수동 생성 트리거"},
+    {"name": "admin", "description": "내부 운영용 — 리뷰 배치 분석, 주간 리포트 수동 생성, 테스트 데이터 시드 트리거"},
 ]
 
 app = FastAPI(
