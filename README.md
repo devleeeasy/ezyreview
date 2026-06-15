@@ -361,8 +361,9 @@ ezyreview/
 │   ├── test_insights.py
 │   └── load_test.py         # Locust 부하 테스트
 ├── scripts/
-│   ├── seed_reviews.py             # 테스트 리뷰 데이터 삽입
-│   └── seed_embedding_reviews.py   # 임베딩 포함 리뷰 시드 데이터 삽입
+│   ├── seed_reviews.py                      # 테스트 리뷰 데이터 삽입
+│   ├── seed_embedding_reviews.py            # 임베딩 포함 리뷰 시드 데이터 삽입
+│   └── precompute_sample_review_analysis.py # admin seed용 임베딩/감성분석 결과 사전 계산
 ├── docker-compose.yml
 └── .env.example
 ```
