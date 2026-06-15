@@ -16,37 +16,29 @@
 
 ---
 
+## 핵심 역량
+
+이 프로젝트를 통해 다음 역량을 실제로 구현하고 검증했습니다.
+
+**백엔드 아키텍처**
+- FastAPI + Celery + Redis 기반 비동기 처리 — 웹훅 응답과 무거운 로직(알림 발송, AI 분석)을 분리해 응답 속도 확보
+- 멀티테넌트 SaaS 설계 — DB 분리형 격리, API 키 기반 동적 DB 라우팅, 엔진 캐싱으로 테넌트 수평 확장
+- 외부 API 장애 대응 — `autoretry_for` + exponential backoff, 실패 상태 DB 기록으로 수동 재처리 지원
+
+**AI/LLM 통합**
+- OpenAI gpt-4o-mini로 감성 분석 / 키워드 추출 / 한줄 요약 / 주간 리포트 생성 파이프라인 구축
+- text-embedding-3-small + pgvector로 리뷰 시맨틱 검색(코사인 유사도) 구현
+- AI 호출을 비동기·배치로 설계해 API 응답 지연 없이, 중복 분석 방지로 비용 최적화
+
+**운영 / 성능**
+- Locust 부하 테스트로 처리량(86.9 req/s) 및 p95/p99 측정, 쿼리 최적화로 인사이트 API median 170ms → 41ms 개선
+- Docker Compose 로컬 개발 → Railway 클라우드 배포, 환경별 이슈(SMTP 포트 차단, `$PORT` 미확장, asyncio 이벤트 루프 충돌) 직접 해결
+
+---
+
 ## 시스템 아키텍처
 
 ![시스템 아키텍처](docs/images/architecture.png)
-<!-- ```
-[이커머스 쇼핑몰]
-      │ 주문완료 웹훅 (POST /webhook/{api_key})
-      ▼
-[FastAPI — 웹훅 수신 & 테넌트 인증]
-      │ API 키 검증 → Redis 캐시 → main_db fallback
-      │ 중복 수신 차단 (Redis SET NX)
-      ▼
-[Celery + Redis — 비동기 태스크 큐]
-      │
-      ├──────────────────────────────┐
-      ▼                              ▼
-[review_request_task]         [analytics_task]
- SendGrid 이메일 발송           OpenAI 감성 분석
- (리뷰 요청 알림)               키워드 추출 / 요약
-      │                              │
-      ▼                              ▼
-[tenant_{id}_db]              [tenant_{id}_db]
- orders / notifications         review_analytics
-      │
-      ▼
-[POST /reviews — 리뷰 수집]
-      │ analytics_task 즉시 발행
-      │ generate_embedding_task 즉시 발행
-      ▼
-[GET /insights — 인사이트 API]
- 감성 분포 / 평균 평점 / 벡터 검색 / 주간 리포트
-``` -->
 
 **설계 원칙**
 - 웹훅 수신과 비즈니스 로직 분리 - Celery로 위임해 API 응답 200ms 이하 유지
@@ -101,103 +93,18 @@ tenant_{id}_db       (테넌트별 완전 격리)
 
 ![데이터 흐름](docs/images/flow.png)
 
-### 1. 웹훅 수신 → 태스크 발행
+웹훅 수신 → AI 분석 → 인사이트/시맨틱 검색 → 주간 리포트까지 8단계로 구성됩니다.
 
-```
-POST /webhook/{api_key}
-  │
-  ├── API 키 검증 (Redis 캐시 → main_db fallback)
-  ├── 중복 수신 차단 (order_id 기준 Redis SET NX TTL 24h)
-  ├── webhook_logs 기록
-  └── review_request_task 발행 (즉시)
-```
+1. **웹훅 수신 → 태스크 발행** — API 키 검증(Redis 캐시), `order_id` 기준 중복 차단, `review_request_task` 발행
+2. **리뷰 요청 이메일 발송** — SendGrid HTTP API, 실패 시 자동 재시도
+3. **리뷰 수집** — JWT 인증 + 주문/중복 검증 후 `analytics_task`, `generate_embedding_task` 발행
+4. **리뷰 AI 분석** — gpt-4o-mini로 감성 분석 / 키워드 추출 / 한줄 요약
+5. **인사이트 API** — 평균 평점, 감성 분포, 상위 키워드를 3개 쿼리로 집계
+6. **리뷰 임베딩 생성** — text-embedding-3-small로 1536차원 벡터 생성
+7. **의미 기반 리뷰 검색** — pgvector 코사인 유사도 검색
+8. **주간 리포트 생성 및 발송** — Celery Beat 배치로 전체 테넌트 병렬 처리, OpenAI 요약 + SendGrid 발송
 
-### 2. 리뷰 요청 이메일 발송
-
-```
-review_request_task
-  │
-  ├── SendGrid HTTP API로 리뷰 요청 이메일 발송
-  ├── notifications 테이블 기록 (sent / failed)
-  └── 실패 시 자동 재시도 (max_retries=3, exponential backoff)
-```
-
-### 3. 리뷰 수집
-
-```
-POST /reviews  (Authorization: Bearer {jwt})
-  │
-  ├── JWT 서명 검증 + 테넌트 식별 (DB 조회 없음, 페이로드에서 추출)
-  ├── 주문 존재 여부 확인 (404)
-  ├── 중복 리뷰 방지 (409)
-  ├── reviews 테이블 저장
-  ├── analytics_task 즉시 발행
-  └── generate_embedding_task 즉시 발행
-```
-
-### 4. 리뷰 AI 분석
-
-```
-analytics_task (리뷰 등록 즉시 + 매일 새벽 2시 배치)
-  │
-  ├── OpenAI gpt-4o-mini 호출
-  │     ├── 감성 분석 (positive / negative / neutral)
-  │     ├── 키워드 추출 (상위 3개)
-  │     └── 한줄 요약
-  └── review_analytics 저장 (중복 분석 방지)
-```
-
-### 5. 인사이트 API
-
-```
-GET /insights/summary  (Authorization: Bearer {jwt})
-  │
-  ├── JWT 서명 검증 + 테넌트 식별
-  ├── tenant_{id}_db 집계 (3개 쿼리, GROUP BY 최적화)
-  │     ├── 전체 리뷰 수 + 평균 평점 (단일 쿼리)
-  │     ├── 감성 분포 (positive / negative / neutral / unanalyzed — GROUP BY 단일 쿼리)
-  │     └── 상위 3개 키워드 (PostgreSQL json_array_elements_text로 DB 내 집계)
-  └── 응답 반환
-```
-
-### 6. 리뷰 임베딩 생성
-
-```
-generate_embedding_task (리뷰 등록 즉시)
-  │
-  ├── OpenAI text-embedding-3-small 호출 (1536차원 벡터)
-  └── reviews.embedding 컬럼 업데이트
-```
-
-### 7. 의미 기반 리뷰 검색
-
-```
-GET /insights/search?q=배송이 느려요
-  │
-  ├── 검색어 → text-embedding-3-small 임베딩
-  ├── pgvector 코사인 유사도 검색 (reviews.embedding <=> query_vector)
-  ├── sentiment / 평점 범위 필터 선택 적용
-  └── 유사도 높은 리뷰 최대 50건 반환
-```
-
-### 8. 주간 리포트 생성 및 발송
-
-```
-Celery Beat (매주 월요일 오전 9시 KST)
-  │
-  ├── 전체 active 테넌트 조회
-  └── generate_weekly_report_task.group() 병렬 실행
-        │
-        ├── 7일치 reviews + review_analytics 집계
-        │     (total_reviews, avg_rating, 감성 레이블 포함 본문 최대 50건)
-        ├── OpenAI gpt-4o-mini로 요약 / 주요 불만 / 주요 긍정 추출
-        ├── weekly_reports 저장
-        └── send_weekly_report_email_task 체이닝
-              ├── SendGrid HTML 이메일 발송
-              └── mail_sent_at 업데이트
-```
-
-![주간 리포트 이메일 예시](docs/images/weekly_report_email.png)
+단계별 상세 동작은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 참고.
 
 ---
 
