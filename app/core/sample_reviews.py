@@ -1,4 +1,8 @@
 # 관리자 테스트 데이터 생성용 샘플 리뷰 텍스트 / 상품명 풀
+#
+# sample_reviews_analysis.json(임베딩/감성분석 사전 계산 캐시)이 없으면 import 자체가 실패한다.
+# 아래 리뷰 텍스트 풀을 추가/수정한 경우 scripts/precompute_sample_review_analysis.py를
+# 재실행해 캐시를 갱신해야 한다 (안 하면 새/변경된 텍스트에서 KeyError 발생).
 import json
 import random
 from pathlib import Path
