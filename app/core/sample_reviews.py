@@ -1,5 +1,12 @@
 # 관리자 테스트 데이터 생성용 샘플 리뷰 텍스트 / 상품명 풀
+#
+# sample_reviews_analysis.json(임베딩/감성분석 사전 계산 캐시)이 없으면 import 자체가 실패한다.
+# 아래 리뷰 텍스트 풀을 추가/수정한 경우 scripts/precompute_sample_review_analysis.py를
+# 재실행해 캐시를 갱신해야 한다 (안 하면 새/변경된 텍스트에서 KeyError 발생).
+import json
 import random
+from pathlib import Path
+from typing import NamedTuple
 
 POSITIVE_REVIEWS = [
     "배송이 정말 빠르고 포장도 꼼꼼해서 완벽했어요. 제품 품질도 기대 이상입니다!",
@@ -100,9 +107,24 @@ _REVIEW_POOLS: dict[str, list[str]] = {
     "neutral": NEUTRAL_REVIEWS,
 }
 
+# scripts/precompute_sample_review_analysis.py로 1회 계산해둔 임베딩/감성분석 결과
+# (텍스트별 embedding/sentiment/keywords/summary) — seed-test-data가 OpenAI를 호출하지 않도록 캐싱
+_ANALYSIS: dict[str, dict] = json.loads(
+    (Path(__file__).parent / "sample_reviews_analysis.json").read_text(encoding="utf-8")
+)
 
-def sample_reviews(count: int) -> list[tuple[str, float]]:
-    """count개의 (리뷰 내용, 평점) 쌍을 감성별 풀에서 중복 없이 섞어서 추출한다."""
+
+class SampleReview(NamedTuple):
+    content: str
+    rating: float
+    embedding: list[float]
+    sentiment: str
+    keywords: list[str]
+    summary: str
+
+
+def sample_reviews(count: int) -> list[SampleReview]:
+    """count개의 샘플 리뷰를 감성별 풀에서 중복 없이 섞어서, 사전 계산된 임베딩·분석 결과와 함께 추출한다."""
     candidates = [
         (sentiment, content)
         for sentiment, pool in _REVIEW_POOLS.items()
@@ -110,6 +132,13 @@ def sample_reviews(count: int) -> list[tuple[str, float]]:
     ]
     random.shuffle(candidates)
     return [
-        (content, random.choice(_RATING_RANGES[sentiment]))
+        SampleReview(
+            content=content,
+            rating=random.choice(_RATING_RANGES[sentiment]),
+            embedding=_ANALYSIS[content]["embedding"],
+            sentiment=_ANALYSIS[content]["sentiment"],
+            keywords=_ANALYSIS[content]["keywords"],
+            summary=_ANALYSIS[content]["summary"],
+        )
         for sentiment, content in candidates[:count]
     ]
