@@ -1,4 +1,6 @@
 # 관리용 엔드포인트 — 배치 작업 수동 트리거 (내부 운영용)
+import random
+import time
 from datetime import date
 from typing import Annotated
 
@@ -6,6 +8,9 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import TenantData, verify_jwt
+from app.core.db import get_tenant_session
+from app.core.sample_reviews import PRODUCTS, sample_reviews
+from app.models.tenant import Order, Review
 from worker.analytics import analyze_review, get_unanalyzed_review_ids
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -25,6 +30,15 @@ class ReportTriggerResult(BaseModel):
     message: str = Field(description="처리 결과 메시지")
     tenant_id: int = Field(description="리포트를 생성한 테넌트 ID")
     week_end: date = Field(description="리포트 기간 종료일 (이 날짜 포함 7일)")
+
+
+class SeedTestDataResult(BaseModel):
+    """테스트 데이터 생성 결과."""
+
+    message: str = Field(description="처리 결과 메시지")
+    tenant_id: int = Field(description="테스트 데이터를 생성한 테넌트 ID")
+    review_ids: list[int] = Field(description="생성된 리뷰 ID 목록")
+    queued_tasks: int = Field(description="큐에 등록된 AI 분석/임베딩 태스크 수")
 
 
 @router.post("/run-batch/{tenant_id}", response_model=BatchResult)
@@ -65,4 +79,51 @@ async def generate_report(
         message="report generation completed",
         tenant_id=tenant_id,
         week_end=effective_week_end,
+    )
+
+
+@router.post("/seed-test-data/{tenant_id}", response_model=SeedTestDataResult)
+async def seed_test_data(
+    tenant_id: int,
+    tenant: Annotated[TenantData, Depends(verify_jwt)],
+    count: int = Query(
+        default=10, ge=1, le=10,
+        description="생성할 테스트 주문/리뷰 개수 (최대 10개)",
+    ),
+) -> SeedTestDataResult:
+    """데모/시연용 테스트 리뷰 생성 (최대 10건).
+
+    생성된 리뷰마다 감성 분석·임베딩 태스크가 큐잉되어 OpenAI API가 호출됩니다.
+    """
+    from worker.tasks import analytics_task, generate_embedding_task
+
+    timestamp = int(time.time())
+    review_ids: list[int] = []
+
+    async with get_tenant_session(tenant_id) as db:
+        for i, (content, rating) in enumerate(sample_reviews(count)):
+            order_id = f"admin-seed-{timestamp}-{i + 1}"
+            db.add(Order(
+                order_id=order_id,
+                customer_phone="010-0000-0000",
+                product_name=random.choice(PRODUCTS),
+                status="completed",
+            ))
+            review = Review(order_id=order_id, content=content, rating=rating)
+            db.add(review)
+            await db.flush()
+            review_ids.append(review.id)
+
+        await db.commit()
+
+    # 실제 /reviews 흐름과 동일하게 분석/임베딩 태스크만 큐잉 — 알림 발송은 하지 않음
+    for review_id in review_ids:
+        analytics_task.delay(tenant_id, review_id)
+        generate_embedding_task.delay(tenant_id, review_id)
+
+    return SeedTestDataResult(
+        message="test data generation queued",
+        tenant_id=tenant_id,
+        review_ids=review_ids,
+        queued_tasks=len(review_ids) * 2,
     )
