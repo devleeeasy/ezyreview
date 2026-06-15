@@ -91,6 +91,10 @@ async def seed_test_data(
         description="생성할 테스트 주문/리뷰 개수 (최대 10개)",
     ),
 ) -> SeedTestDataResult:
+    """데모/시연용 테스트 리뷰 생성 (최대 10건).
+
+    생성된 리뷰마다 감성 분석·임베딩 태스크가 큐잉되어 OpenAI API가 호출됩니다.
+    """
     from worker.tasks import analytics_task, generate_embedding_task
 
     timestamp = int(time.time())
