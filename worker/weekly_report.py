@@ -74,8 +74,22 @@ async def generate_weekly_report(tenant_id: int, force_week_end: date | None = N
         total_reviews, avg_rating = stats.one()
 
         if not total_reviews:
-            logger.info("No reviews this week — tenant=%s week=%s", tenant_id, week_start)
-            return None
+            # 리뷰가 없어도 리포트를 저장하고 이메일 발송 — 아무 반응 없으면 오류처럼 보임
+            logger.info("No reviews this week — tenant=%s week=%s (sending empty report)", tenant_id, week_start)
+            report = WeeklyReport(
+                tenant_id=tenant_id,
+                week_start=week_start,
+                week_end=week_end,
+                total_reviews=0,
+                avg_rating=None,
+                summary="이번 주 수집된 리뷰가 없습니다.",
+                top_issues=json.dumps([], ensure_ascii=False),
+                top_positives=json.dumps([], ensure_ascii=False),
+            )
+            db.add(report)
+            await db.commit()
+            logger.info("Empty weekly report saved — tenant=%s week=%s", tenant_id, week_start)
+            return report.id
 
         # 감성 레이블 포함 리뷰 본문 최대 50건
         rows = (
