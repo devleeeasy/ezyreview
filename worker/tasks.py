@@ -46,8 +46,19 @@ def generate_embedding_task(self, tenant_id: int, review_id: int) -> None:
 @celery_app.task(bind=True, max_retries=1)
 def batch_analytics_task(self, tenant_id: int) -> None:
     """미분석 리뷰를 일괄 analytics_task + generate_embedding_task로 위임한다."""
+    import asyncpg
+    from sqlalchemy.exc import OperationalError
     from worker.analytics import get_unanalyzed_review_ids
-    review_ids = asyncio.run(get_unanalyzed_review_ids(tenant_id))
+
+    try:
+        review_ids = asyncio.run(get_unanalyzed_review_ids(tenant_id))
+    except OperationalError as e:
+        # 웹훅을 아직 수신하지 않아 테넌트 DB가 없는 경우 스킵
+        if isinstance(getattr(e, "orig", None), asyncpg.InvalidCatalogNameError):
+            logger.warning("batch_analytics_task skipped — tenant=%s (DB not ready)", tenant_id)
+            return
+        raise
+
     for review_id in review_ids:
         analytics_task.delay(tenant_id, review_id)
         generate_embedding_task.delay(tenant_id, review_id)
@@ -62,8 +73,19 @@ def batch_analytics_task(self, tenant_id: int) -> None:
     retry_backoff_max=60,
 )
 def generate_weekly_report_task(self, tenant_id: int) -> None:
+    import asyncpg
+    from sqlalchemy.exc import OperationalError
     from worker.weekly_report import generate_weekly_report
-    report_id = asyncio.run(generate_weekly_report(tenant_id))
+
+    try:
+        report_id = asyncio.run(generate_weekly_report(tenant_id))
+    except OperationalError as e:
+        # 웹훅을 아직 수신하지 않아 테넌트 DB가 없는 경우 스킵
+        if isinstance(getattr(e, "orig", None), asyncpg.InvalidCatalogNameError):
+            logger.warning("generate_weekly_report_task skipped — tenant=%s (DB not ready)", tenant_id)
+            return
+        raise
+
     if report_id is not None:
         send_weekly_report_email_task.delay(tenant_id, report_id)
 
