@@ -59,15 +59,11 @@ OpenAI API를 호출하지 않으므로 즉시 실행됩니다.
 **3단계 — 인사이트 확인**
 `GET /insights/summary` → `GET /insights/search` → `POST /admin/generate-report/{tenant_id}`
 
----
-
-> **실제 웹훅 시나리오**: `POST /webhook/order-completed` 수신 → Celery가 알림 발송·AI 분석 자동 처리 → 인사이트 확인
 """
 
 _TAGS: list[dict] = [
     {"name": "tenants", "description": "테넌트 등록 및 API 키 관리"},
     {"name": "auth", "description": "테넌트 로그인 및 JWT 토큰 발급"},
-    {"name": "webhook", "description": "주문 완료 웹훅 수신 — 테넌트 인증 후 리뷰 요청 알림 발송"},
     {"name": "reviews", "description": "리뷰 목록 조회 및 상세 확인"},
     {"name": "insights", "description": "AI 기반 리뷰 감성 분석, pgvector 의미 검색, 주간 리뷰 요약 리포트"},
     {"name": "admin", "description": "내부 운영용 — 리뷰 배치 분석, 주간 리포트 수동 생성, 테스트 데이터 시드 트리거"},
