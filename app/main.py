@@ -46,6 +46,22 @@ AI로 리뷰를 분석하는 **멀티테넌트 SaaS 백엔드**입니다.
 - **AI 인사이트 (NLU)**: OpenAI 기반 자연어 처리로 리뷰 감성(긍정/부정/중립)을 분석하고 핵심 이슈·강점을 추출
 - **의미 기반 검색**: pgvector 코사인 유사도로 리뷰를 벡터화해 자연어 쿼리로 유사 리뷰를 찾는 클라우드 기반 시맨틱 서치
 - **주간 리포트**: 비정형 리뷰 텍스트를 AI로 요약·분석한 주간 인사이트 리포트 자동 생성 및 이메일 발송
+
+## 데모 시연 순서
+
+**1단계 — 테넌트 등록 & 인증**
+`POST /tenants` 로 테넌트를 등록한 뒤 `POST /auth/token` 으로 JWT를 발급받습니다.
+
+**2단계 — 샘플 데이터 생성** *(DB가 비어있을 때)*
+`POST /admin/seed-test-data/{tenant_id}` 로 주문·리뷰·분석 결과를 한번에 생성합니다.
+OpenAI API를 호출하지 않으므로 즉시 실행됩니다.
+
+**3단계 — 인사이트 확인**
+`GET /insights/summary` → `GET /insights/search` → `POST /admin/generate-report/{tenant_id}`
+
+---
+
+> **실제 웹훅 시나리오**: `POST /webhook/order-completed` 수신 → Celery가 알림 발송·AI 분석 자동 처리 → 인사이트 확인
 """
 
 _TAGS: list[dict] = [
