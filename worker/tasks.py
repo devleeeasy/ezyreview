@@ -52,9 +52,11 @@ def batch_analytics_task(self, tenant_id: int) -> None:
 
     try:
         review_ids = asyncio.run(get_unanalyzed_review_ids(tenant_id))
-    except OperationalError as e:
+    except (OperationalError, asyncpg.InvalidCatalogNameError) as e:
         # 웹훅을 아직 수신하지 않아 테넌트 DB가 없는 경우 스킵
-        if isinstance(getattr(e, "orig", None), asyncpg.InvalidCatalogNameError):
+        is_missing_db = isinstance(e, asyncpg.InvalidCatalogNameError) or \
+                        isinstance(getattr(e, "orig", None), asyncpg.InvalidCatalogNameError)
+        if is_missing_db:
             logger.warning("batch_analytics_task skipped — tenant=%s (DB not ready)", tenant_id)
             return
         raise
@@ -79,9 +81,11 @@ def generate_weekly_report_task(self, tenant_id: int) -> None:
 
     try:
         report_id = asyncio.run(generate_weekly_report(tenant_id))
-    except OperationalError as e:
+    except (OperationalError, asyncpg.InvalidCatalogNameError) as e:
         # 웹훅을 아직 수신하지 않아 테넌트 DB가 없는 경우 스킵
-        if isinstance(getattr(e, "orig", None), asyncpg.InvalidCatalogNameError):
+        is_missing_db = isinstance(e, asyncpg.InvalidCatalogNameError) or \
+                        isinstance(getattr(e, "orig", None), asyncpg.InvalidCatalogNameError)
+        if is_missing_db:
             logger.warning("generate_weekly_report_task skipped — tenant=%s (DB not ready)", tenant_id)
             return
         raise

@@ -114,10 +114,13 @@ def _build_html_body(report: WeeklyReport, tenant_name: str) -> str:
 
     issues = _parse_list(report.top_issues)
     positives = _parse_list(report.top_positives)
-    avg_str = f"{report.avg_rating:.1f}" if report.avg_rating else "N/A"
-
     issues_html = "".join(f"<li>{item}</li>" for item in issues if item) or "<li>해당 없음</li>"
     positives_html = "".join(f"<li>{item}</li>" for item in positives if item) or "<li>해당 없음</li>"
+
+    if report.total_reviews and report.avg_rating:
+        stats_html = f"총 리뷰 수: <strong>{report.total_reviews}건</strong>&nbsp;&nbsp;|&nbsp;&nbsp;평균 평점: <strong>{report.avg_rating:.1f}점</strong>"
+    else:
+        stats_html = f"총 리뷰 수: <strong>{report.total_reviews}건</strong>"
 
     return f"""<!DOCTYPE html>
 <html>
@@ -128,7 +131,7 @@ def _build_html_body(report: WeeklyReport, tenant_name: str) -> str:
 
   <div style="background:#f9f9f9;border-radius:8px;padding:16px;margin:20px 0;">
     <h3 style="margin-top:0;">이번 주 요약</h3>
-    <p>총 리뷰 수: <strong>{report.total_reviews}건</strong>&nbsp;&nbsp;|&nbsp;&nbsp;평균 평점: <strong>{avg_str}점</strong></p>
+    <p>{stats_html}</p>
     <p style="margin-bottom:0;">{report.summary or ""}</p>
   </div>
 
