@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.core.auth import TenantData, verify_jwt
-from app.core.db import get_tenant_session
+from app.core.db import create_tenant_db, get_tenant_session
 from app.core.sample_reviews import PRODUCTS, sample_reviews
 from app.models.tenant import Order, Review, ReviewAnalytics
 from worker.analytics import analyze_review, get_unanalyzed_review_ids
@@ -117,6 +117,9 @@ async def seed_test_data(
     """
     timestamp = int(time.time())
     review_ids: list[int] = []
+
+    # 웹훅을 한 번도 받지 않은 신규 테넌트는 tenant DB가 아직 없으므로 먼저 생성
+    await create_tenant_db(tenant_id)
 
     async with get_tenant_session(tenant_id) as db:
         for i, sample in enumerate(sample_reviews(count)):

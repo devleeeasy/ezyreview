@@ -15,7 +15,9 @@ services:
       - .:/app
 
   db:
-    image: pgvector/pgvector:pg16
+    # 태그(pg16)만 쓰면 재빌드 시점마다 베이스 이미지 glibc가 바뀌어 기존 DB와
+    # 콜레이션 버전이 어긋날 수 있음 (CREATE DATABASE 실패) — digest로 고정
+    image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     environment:
       POSTGRES_USER: ezyreview
       POSTGRES_PASSWORD: ezyreview
