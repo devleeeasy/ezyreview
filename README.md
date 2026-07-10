@@ -2,7 +2,7 @@
 
 > 이커머스 쇼핑몰의 주문 완료 웹훅을 수신해 리뷰 요청 알림을 자동 발송하고, AI로 수집된 리뷰를 분석하는 **멀티테넌트 SaaS 백엔드**
 
-**API 문서 (라이브):** https://ezyreview-production.up.railway.app/docs
+**API 문서 (라이브):** https://ezyreview-production.up.railway.app/docs · [ReDoc](https://ezyreview-production.up.railway.app/redoc)
 
 ---
 
@@ -227,8 +227,8 @@ curl http://localhost:8000/insights/report \
   -H "Authorization: Bearer {access_token}"
 ```
 
-API 문서 (로컬): `http://localhost:8000/docs`  
-API 문서 (라이브): `https://ezyreview-production.up.railway.app/docs`
+API 문서 (로컬): `http://localhost:8000/docs` (Swagger) · `http://localhost:8000/redoc` (ReDoc)  
+API 문서 (라이브): `https://ezyreview-production.up.railway.app/docs` (Swagger) · `https://ezyreview-production.up.railway.app/redoc` (ReDoc)
 
 ---
 
