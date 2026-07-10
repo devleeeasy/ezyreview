@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.openapi.docs import get_redoc_html
 
 from app.core.config import settings
 from app.api.admin import router as admin_router
@@ -85,7 +86,19 @@ app = FastAPI(
     description=_DESCRIPTION,
     openapi_tags=_TAGS,
     lifespan=lifespan,
+    redoc_url=None,
 )
+
+
+@app.get("/redoc", include_in_schema=False)
+async def redoc_html():
+    # FastAPI 기본값(redoc@next)이 3.0.0-rc.0로 넘어가며 번들 경로가 바뀌어 깨짐 — redoc@2로 고정
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} - ReDoc",
+        redoc_js_url="https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js",
+    )
+
 
 app.include_router(tenants_router)
 app.include_router(auth_router)
