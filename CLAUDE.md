@@ -42,6 +42,32 @@ ezyreview/
 └── CLAUDE.md
 ```
 
+### 확장 예정 (AI 인용 모니터링, `feature/ai-citation-monitor`)
+기존 `app/`, `worker/` 구조를 그대로 유지하며 아래 위치에 신규 모듈을 추가한다.
+별도 `backend/` 트리로 분리하지 않는다 — 이미 단일 백엔드 repo라 구분 실익이 없고,
+기존 코드 전체를 옮기는 리네임 비용만 발생하기 때문.
+
+```
+app/
+├── collectors/
+│   └── ai_answer_collector.py   # Playwright + CDP 기반 AI 검색엔진 응답 수집
+├── models/
+│   └── citation.py              # categories, brands, brand_alias, queries, citations
+├── analysis/
+│   └── citation_context.py      # 인용 문맥 감성 분석 (기존 sentiment.py 연동)
+frontend/                        # 신규 최상위 디렉토리 — Next.js 대시보드, Vercel Root Directory 지정용
+├── app/
+└── components/
+```
+
+프론트엔드(`frontend/`)만 유일하게 신규 최상위 디렉토리로 추가한다 — Vercel 배포가
+독립된 Root Directory를 요구하기 때문. Airflow DAG, Grafana 등 운영 도구는 별도 Railway
+서비스로 배포하며 이 repo의 코드 구조에는 편입하지 않는다.
+
+Phase 1(고정 카테고리/브랜드 seed로 수집·분석 파이프라인 완성) → Phase 2(사용자가
+카테고리/브랜드를 직접 등록하는 쓰기 API) 순으로 진행. Phase 2 전까지
+`categories.parent_id` 등 미구현 확장 컬럼은 스키마에만 존재하고 로직은 만들지 않는다.
+
 ---
 
 ## 코딩 규칙
