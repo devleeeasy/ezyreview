@@ -70,8 +70,10 @@ frontend/                        # 신규 최상위 디렉토리 — Next.js 대
 Perplexity의 robots.txt가 `/search/new`, `/search*` 등 질의·응답 경로를 명시적으로 봇
 차단하고 있어 실제 서비스를 자동화 대상으로 삼지 않기로 결정. 우리가 직접 운영하는
 서버라 robots.txt/ToS 이슈가 발생하지 않으며, Playwright+CDP 자동화 기술 시연이라는
-목적은 그대로 유지된다. Perplexica는 SSE가 아닌 **WebSocket 스트리밍**이므로 CDP에서
-`Network.webSocketFrameReceived` 이벤트를 구독해야 한다.
+목적은 그대로 유지된다. Perplexica(Vane)는 실측 결과 WebSocket이 아니라 **SSE
+(Server-Sent Events, `Content-Type: text/event-stream`)**로 스트리밍되므로, CDP에서
+`Network.webSocketFrameReceived`가 아닌 **`Network.eventSourceMessageReceived`** 이벤트를
+구독해 프레임을 수집한다.
 
 Phase 1(고정 카테고리/브랜드 seed로 수집·분석 파이프라인 완성) → Phase 2(사용자가
 카테고리/브랜드를 직접 등록하는 쓰기 API) 순으로 진행. Phase 2 전까지

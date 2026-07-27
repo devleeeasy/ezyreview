@@ -58,8 +58,9 @@ ezyreview/
   - **최종 대상: Perplexica(오픈소스 Perplexity 클론, 최근 Vane으로 리브랜딩, MIT 라이선스)를 직접 셀프호스팅**하여 그 화면에 자동화를 건다. 우리가 운영하는 서버이므로 robots.txt/ToS 이슈 자체가 발생하지 않음.
   - Perplexica 자체 API(3001 포트)가 있지만 의도적으로 사용하지 않음 — 이 프로젝트의 목적은 "API가 없는 실제 서비스(예: ChatGPT 등)를 가정한 수집 역량" 실증이므로, API가 있어도 웹 UI 자동화 경로를 선택. README/자소서에 이 판단 근거를 한 줄로 남길 것.
   - 셀프호스팅 특성상 실제 소비자가 보는 진짜 Perplexity 응답이 아닌 자체 구성한 데모 데이터라는 한계는 README에 명시.
-- [ ] Perplexica(Vane) Docker Compose로 로컬/Railway에 셀프호스팅 (SearXNG 내장, LLM은 기존 프로젝트가 쓰는 OpenAI API로 연결)
-- [ ] 개발자도구(F12) Network 탭에서 직접 질의 던져보며 응답 형식 관찰 — **SSE가 아닌 WebSocket 스트리밍**이므로 프레임 구조 확인 필요
+- [x] Perplexica(Vane) Docker Compose로 로컬에 셀프호스팅 (SearXNG 내장, Chat Model: `gpt-4.1-mini`, Embedding Model: `text-embedding-3-small`)
+- [x] 개발자도구(F12) Network 탭에서 직접 질의 던져보며 응답 형식 관찰
+  - **실측 결과: WebSocket이 아니라 SSE(`Content-Type: text/event-stream`)로 스트리밍됨.** 사전 가정(WebSocket)은 틀렸음 — 2단계 CDP 구독 대상을 `Network.eventSourceMessageReceived`로 정정.
 
 ## 1단계 — DB 스키마 설계
 
@@ -121,8 +122,8 @@ INSERT INTO queries (category_id, text) VALUES
 - [ ] Playwright 브라우저 세션 기동, 셀프호스팅한 Perplexica(Vane) 인스턴스(`http://localhost:3000`) 접속
 - [ ] `queries` 테이블에서 활성 질의 조회 → for loop 순회
 - [ ] 페이지 접속 → 질의 입력창 자동 채움 → 전송
-- [ ] CDP 세션 연결, `Network.enable` 후 **WebSocket 프레임 이벤트(`Network.webSocketFrameReceived`) 구독** (Perplexica는 SSE가 아닌 WebSocket 스트리밍)
-- [ ] 원본 프레임 청크 누적 → 최종 응답 텍스트 재구성
+- [ ] CDP 세션 연결, `Network.enable` 후 **SSE 메시지 이벤트(`Network.eventSourceMessageReceived`) 구독** (Perplexica는 WebSocket이 아닌 SSE 스트리밍 — 0단계 실측으로 확인)
+- [ ] 원본 이벤트 청크 누적 → 최종 응답 텍스트 재구성
 - [ ] User-Agent 로테이션, 요청 간 랜덤 딜레이 적용 (자체 서버 대상이라 필수는 아니지만, 실제 서비스 대상 상황을 가정한 역량 실증 차원에서 구현)
 - [ ] 실패/타임아웃 재시도 로직 (기존 "점진적 재시도 전략" 패턴 재사용)
 
