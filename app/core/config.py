@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     GMAIL_APP_PASSWORD: str = ""  # Gmail 앱 비밀번호 (로컬 전용)
     SENDGRID_API_KEY: str = ""    # SendGrid API 키 (Railway 배포용)
     SENDGRID_FROM_EMAIL: str = "" # SendGrid 발신자 인증 이메일
+    VANE_URL: str = "http://vane:3000"  # 셀프호스팅 Perplexica(Vane) — 컨테이너 네트워크 내부 주소
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

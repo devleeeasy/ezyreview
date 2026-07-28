@@ -76,12 +76,15 @@ services:
 
   # AI 인용 모니터링 크롤링 대상 — 셀프호스팅 Perplexica(Vane), SearxNG 내장
   # 최초 접속(http://localhost:3000) 시 설정 화면에서 OpenAI API 키 입력 필요
+  # CVE-2026-9371: GET /api/config가 인증 없이 설정된 API 키를 평문으로 반환하는
+  # Vane 자체의 미패치 취약점 — 로컬 네트워크 내 다른 기기에서의 접근을 막기 위해
+  # 호스트 바인딩을 127.0.0.1로 제한(외부 노출 없이 컨테이너 간 통신은 영향 없음).
   vane:
     image: itzcrazykns1337/vane:latest
     environment:
       TZ: Asia/Seoul
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - vane_data:/home/vane/data
 
