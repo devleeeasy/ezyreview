@@ -74,5 +74,17 @@ services:
     volumes:
       - .:/app
 
+  # AI 인용 모니터링 크롤링 대상 — 셀프호스팅 Perplexica(Vane), SearxNG 내장
+  # 최초 접속(http://localhost:3000) 시 설정 화면에서 OpenAI API 키 입력 필요
+  vane:
+    image: itzcrazykns1337/vane:latest
+    environment:
+      TZ: Asia/Seoul
+    ports:
+      - "3000:3000"
+    volumes:
+      - vane_data:/home/vane/data
+
 volumes:
   postgres_data:
+  vane_data:

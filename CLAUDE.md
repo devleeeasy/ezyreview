@@ -42,6 +42,43 @@ ezyreview/
 └── CLAUDE.md
 ```
 
+### 확장 예정 (AI 인용 모니터링, `feature/ai-citation-monitor`)
+전체 스펙은 `docs/ai-citation-monitor-extension.md` 참고 — 작업 시작 전 반드시 먼저 읽을 것.
+
+기존 `app/`, `worker/` 구조를 그대로 유지하며 아래 위치에 신규 모듈을 추가한다.
+별도 `backend/` 트리로 분리하지 않는다 — 이미 단일 백엔드 repo라 구분 실익이 없고,
+기존 코드 전체를 옮기는 리네임 비용만 발생하기 때문.
+
+```
+app/
+├── collectors/
+│   └── ai_answer_collector.py   # Playwright + CDP, 셀프호스팅 Perplexica(Vane) 대상
+├── models/
+│   └── citation.py              # categories, brands, brand_alias, queries, citations
+├── analysis/
+│   └── citation_context.py      # 인용 문맥 감성 분석 (기존 OpenAI 연동 방식 재사용)
+frontend/                        # 신규 최상위 디렉토리 — Next.js 대시보드, Vercel Root Directory 지정용
+├── app/
+└── components/
+```
+
+프론트엔드(`frontend/`)만 유일하게 신규 최상위 디렉토리로 추가한다 — Vercel 배포가
+독립된 Root Directory를 요구하기 때문. Airflow DAG, Grafana, Perplexica(Vane) 등 운영/
+크롤링 대상 서비스는 별도 Railway 서비스로 배포하며 이 repo의 코드 구조에는 편입하지 않는다.
+
+**크롤링 대상은 실제 Perplexity가 아니라 셀프호스팅한 Perplexica(Vane, MIT 라이선스)다.**
+Perplexity의 robots.txt가 `/search/new`, `/search*` 등 질의·응답 경로를 명시적으로 봇
+차단하고 있어 실제 서비스를 자동화 대상으로 삼지 않기로 결정. 우리가 직접 운영하는
+서버라 robots.txt/ToS 이슈가 발생하지 않으며, Playwright+CDP 자동화 기술 시연이라는
+목적은 그대로 유지된다. Perplexica(Vane)는 실측 결과 WebSocket이 아니라 **SSE
+(Server-Sent Events, `Content-Type: text/event-stream`)**로 스트리밍되므로, CDP에서
+`Network.webSocketFrameReceived`가 아닌 **`Network.eventSourceMessageReceived`** 이벤트를
+구독해 프레임을 수집한다.
+
+Phase 1(고정 카테고리/브랜드 seed로 수집·분석 파이프라인 완성) → Phase 2(사용자가
+카테고리/브랜드를 직접 등록하는 쓰기 API) 순으로 진행. Phase 2 전까지
+`categories.parent_id` 등 미구현 확장 컬럼은 스키마에만 존재하고 로직은 만들지 않는다.
+
 ---
 
 ## 코딩 규칙
