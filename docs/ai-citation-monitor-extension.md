@@ -80,14 +80,16 @@ categories (id, tenant_id, name, parent_id[NULL], source[seed|user], created_at)
                                  mention_rank, context_snippet, collected_at)
 ```
 
-- [ ] 위 5개 테이블 마이그레이션 작성 (Alembic)
-- [ ] 기존 `main_db`/`tenant_id_db` 분리 구조에 맞춰 반영
-- [ ] pgvector 컬럼 검토 (4단계 인용 맥락 임베딩용)
-- [ ] **seed 데이터 스크립트 작성** — MVP는 이 seed로 카테고리/브랜드를 채움 (아래 예시 참고)
+- [x] 위 5개 테이블 정의 (`app/models/citation.py`, `TenantBase` 소속)
+  - Alembic은 이 repo에 실제로 설정되어 있지 않음 확인 — 대신 기존 관행(`app/core/db.py`의 `create_tenant_db()` / `migrate_all_tenants()`가 `TenantBase.metadata.create_all` + idempotent `ALTER TABLE`로 시작 시 자동 마이그레이션)을 그대로 따름. 신규 테이블은 모델을 `TenantBase.metadata`에 등록하기만 하면 `create_all`이 자동으로 생성 — 별도 마이그레이션 파일 불필요.
+  - `created_at`/`updated_at` 컨벤션: 모든 테이블에 `created_at` 포함. row 수정이 가능한 테이블(`categories`, `brands` — Phase 2 편집 대비, `queries` — `active` 토글)에는 `updated_at`도 추가. `brand_alias`(추가/삭제만, 수정 없음)와 `citations`(수집 즉시 불변 기록, `collected_at`이 사실상 created_at 역할)는 `updated_at` 제외.
+- [x] 기존 `main_db`/`tenant_{id}_db` 분리 구조에 맞춰 반영 — tenant_db 소속, `tenant_id`는 `WeeklyReport`와 동일하게 FK 없는 bare 컬럼(DB 자체가 테넌트 경계라 cross-DB FK 불가)
+- [ ] pgvector 컬럼 검토 (4단계 인용 맥락 임베딩용) — Phase 1 범위 아님, 4단계에서 진행
+- [x] **seed 데이터 스크립트 작성** — `scripts/seed_citation_data.py` (아래 예시와 동일한 데이터)
 
 > **TODO (미구현, 스키마만 예약)**: `categories.parent_id`는 나중에 카테고리 계층화(예: 전자제품 > 노트북)가 필요해질 때를 대비해 컬럼만 미리 넣어둔다. Phase 1/2 모두 `parent_id`는 항상 NULL로 두고, 계층 조회 로직·UI는 만들지 않는다. 카테고리가 10개 이상으로 늘어나 필터링 니즈가 생기면 그때 값 채우기 + 재귀 쿼리 + 대시보드 필터 UI를 별도 Phase로 진행.
 
-**완료 기준**: 마이그레이션 적용 후 seed 데이터 insert, 카테고리→브랜드→질의 join 조회 정상 동작
+**완료 기준**: 마이그레이션 적용 후 seed 데이터 insert, 카테고리→브랜드→질의 join 조회 정상 동작 — ✅ 확인 완료 (tenant_1_db, categories 1 / brands 5 / brand_alias 7 / queries 10)
 
 ### Seed 데이터 예시 (카테고리: 노트북)
 
@@ -115,7 +117,7 @@ INSERT INTO queries (category_id, text) VALUES
   (1, '게이밍 겸용 가능한 노트북 추천');
 ```
 
-두 번째 카테고리(예: 청소기)도 같은 방식으로 seed 추가 가능 — 브랜드: 삼성전자·LG전자·다이슨·샤크·일렉트로룩스.
+두 번째 카테고리(청소기, 브랜드: 삼성전자·LG전자·다이슨·샤크·일렉트로룩스)도 `CATEGORIES` dict에 추가해 구현 완료. `python scripts/seed_citation_data.py [카테고리명]`으로 카테고리를 선택해 실행 (미지정 시 노트북).
 
 ## 2단계 — 수집 모듈 (Playwright + CDP)
 
