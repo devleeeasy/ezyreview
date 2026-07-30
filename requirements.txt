@@ -14,3 +14,4 @@ openai==1.51.0
 sendgrid==6.11.0
 pytest-asyncio==0.24.0
 pgvector==0.3.6
+playwright==1.48.0

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.models.main import MainBase
 from app.models.tenant import TenantBase
+from app.models import citation  # noqa: F401  — TenantBase.metadata에 카테고리/브랜드/질의/인용 테이블 등록
 
 logger = logging.getLogger(__name__)
 

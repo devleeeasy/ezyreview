@@ -80,14 +80,16 @@ categories (id, tenant_id, name, parent_id[NULL], source[seed|user], created_at)
                                  mention_rank, context_snippet, collected_at)
 ```
 
-- [ ] 위 5개 테이블 마이그레이션 작성 (Alembic)
-- [ ] 기존 `main_db`/`tenant_id_db` 분리 구조에 맞춰 반영
-- [ ] pgvector 컬럼 검토 (4단계 인용 맥락 임베딩용)
-- [ ] **seed 데이터 스크립트 작성** — MVP는 이 seed로 카테고리/브랜드를 채움 (아래 예시 참고)
+- [x] 위 5개 테이블 정의 (`app/models/citation.py`, `TenantBase` 소속)
+  - Alembic은 이 repo에 실제로 설정되어 있지 않음 확인 — 대신 기존 관행(`app/core/db.py`의 `create_tenant_db()` / `migrate_all_tenants()`가 `TenantBase.metadata.create_all` + idempotent `ALTER TABLE`로 시작 시 자동 마이그레이션)을 그대로 따름. 신규 테이블은 모델을 `TenantBase.metadata`에 등록하기만 하면 `create_all`이 자동으로 생성 — 별도 마이그레이션 파일 불필요.
+  - `created_at`/`updated_at` 컨벤션: 모든 테이블에 `created_at` 포함. row 수정이 가능한 테이블(`categories`, `brands` — Phase 2 편집 대비, `queries` — `active` 토글)에는 `updated_at`도 추가. `brand_alias`(추가/삭제만, 수정 없음)와 `citations`(수집 즉시 불변 기록, `collected_at`이 사실상 created_at 역할)는 `updated_at` 제외.
+- [x] 기존 `main_db`/`tenant_{id}_db` 분리 구조에 맞춰 반영 — tenant_db 소속, `tenant_id`는 `WeeklyReport`와 동일하게 FK 없는 bare 컬럼(DB 자체가 테넌트 경계라 cross-DB FK 불가)
+- [ ] pgvector 컬럼 검토 (4단계 인용 맥락 임베딩용) — Phase 1 범위 아님, 4단계에서 진행
+- [x] **seed 데이터 스크립트 작성** — `scripts/seed_citation_data.py` (아래 예시와 동일한 데이터)
 
 > **TODO (미구현, 스키마만 예약)**: `categories.parent_id`는 나중에 카테고리 계층화(예: 전자제품 > 노트북)가 필요해질 때를 대비해 컬럼만 미리 넣어둔다. Phase 1/2 모두 `parent_id`는 항상 NULL로 두고, 계층 조회 로직·UI는 만들지 않는다. 카테고리가 10개 이상으로 늘어나 필터링 니즈가 생기면 그때 값 채우기 + 재귀 쿼리 + 대시보드 필터 UI를 별도 Phase로 진행.
 
-**완료 기준**: 마이그레이션 적용 후 seed 데이터 insert, 카테고리→브랜드→질의 join 조회 정상 동작
+**완료 기준**: 마이그레이션 적용 후 seed 데이터 insert, 카테고리→브랜드→질의 join 조회 정상 동작 — ✅ 확인 완료 (tenant_1_db, categories 1 / brands 5 / brand_alias 7 / queries 10)
 
 ### Seed 데이터 예시 (카테고리: 노트북)
 
@@ -115,19 +117,28 @@ INSERT INTO queries (category_id, text) VALUES
   (1, '게이밍 겸용 가능한 노트북 추천');
 ```
 
-두 번째 카테고리(예: 청소기)도 같은 방식으로 seed 추가 가능 — 브랜드: 삼성전자·LG전자·다이슨·샤크·일렉트로룩스.
+두 번째 카테고리(청소기, 브랜드: 삼성전자·LG전자·다이슨·샤크·일렉트로룩스)도 `CATEGORIES` dict에 추가해 구현 완료. `python scripts/seed_citation_data.py [카테고리명]`으로 카테고리를 선택해 실행 (미지정 시 노트북).
 
 ## 2단계 — 수집 모듈 (Playwright + CDP)
 
-- [ ] Playwright 브라우저 세션 기동, 셀프호스팅한 Perplexica(Vane) 인스턴스(`http://localhost:3000`) 접속
-- [ ] `queries` 테이블에서 활성 질의 조회 → for loop 순회
-- [ ] 페이지 접속 → 질의 입력창 자동 채움 → 전송
-- [ ] CDP 세션 연결, `Network.enable` 후 **SSE 메시지 이벤트(`Network.eventSourceMessageReceived`) 구독** (Perplexica는 WebSocket이 아닌 SSE 스트리밍 — 0단계 실측으로 확인)
-- [ ] 원본 이벤트 청크 누적 → 최종 응답 텍스트 재구성
-- [ ] User-Agent 로테이션, 요청 간 랜덤 딜레이 적용 (자체 서버 대상이라 필수는 아니지만, 실제 서비스 대상 상황을 가정한 역량 실증 차원에서 구현)
-- [ ] 실패/타임아웃 재시도 로직 (기존 "점진적 재시도 전략" 패턴 재사용)
+구현: `app/collectors/ai_answer_collector.py`
 
-**완료 기준**: 질의 1건에 대해 raw 응답 텍스트 확인 가능
+- [x] Playwright 브라우저 세션 기동, 셀프호스팅한 Perplexica(Vane) 인스턴스(`http://vane:3000`, 컨테이너 네트워크 내부 주소) 접속
+  - `requirements.txt`에 `playwright` 추가, `Dockerfile`에 `playwright install --with-deps chromium` 반영. 베이스 이미지가 최신 Debian(trixie)로 갱신되며 Playwright의 apt 의존성 패키지명(`ttf-ubuntu-font-family` 등)이 깨져 있어 `python:3.11-slim-bookworm`으로 고정해 해결.
+- [x] `queries` 테이블에서 활성 질의 조회 → for loop 순회 (`collect_active_queries()`)
+- [x] 페이지 접속 → 질의 입력창(`textarea[placeholder="Ask anything..."]`) 자동 채움 → 전송(`button.bg-sky-500` 클릭)
+  - **실측 추가 발견**: 채팅 모델을 명시적으로 선택하지 않으면 기본값이 구조화 출력(`response_format: json_schema`)을 지원하지 않는 모델로 걸려 있어 매 요청이 400 에러로 실패함. 모델 드롭다운에서 "GPT 4.1 mini"를 매 세션(페이지 로드)마다 명시적으로 선택하는 스텝을 추가해 해결.
+- [x] CDP 세션 연결, `Network.enable` — **당초 계획했던 `Network.eventSourceMessageReceived` 구독은 실제로 발동하지 않음을 확인, 방식 재정정**
+  - 실측 결과 Vane의 스트리밍 요청은 네이티브 `EventSource`가 아니라 **`POST` + `fetch()` 기반 스트림**(POST라 애초에 native EventSource 사용 불가)이라, Chrome이 이를 "eventsource" 리소스로 인식하지 않아 `Network.eventSourceMessageReceived`가 전혀 발동하지 않음.
+  - 대신 `Network.responseReceived`로 `/api/chat` 요청을 매칭 → `Network.loadingFinished` 대기 → `Network.getResponseBody`로 스트림 종료 후 전체 원본(NDJSON)을 가져오는 방식으로 우회.
+- [x] 원본 이벤트 청크 누적 → 최종 응답 텍스트 재구성 (`_reconstruct_answer()`)
+  - 응답은 줄바꿈 구분 JSON(NDJSON). `type:"block", block.type:"text"`로 답변 블록이 생성된 뒤, 이어지는 `updateBlock`(`path:"/data"`)들은 매번 "지금까지 누적된 전체 텍스트"로 교체(replace)되는 방식이라, **마지막 값만 취하면 최종 답변**이 됨(델타 병합 불필요).
+- [x] User-Agent 로테이션(`USER_AGENTS` 목록에서 컨텍스트별 랜덤 선택), 요청 간 랜덤 딜레이(3~8초) 적용
+- [x] 실패/타임아웃 재시도 로직 — 기존 Celery 태스크의 "점진적 재시도" 설정(`max_retries=3, retry_backoff exponential, cap 60s`)과 동일한 정책을 자체 구현(`collect_answer()`, 최대 3회·지수 백오프·최대 60초 캡)
+
+**완료 기준**: 질의 1건에 대해 raw 응답 텍스트 확인 가능 — ✅ 확인 완료 (query_id=999 테스트, raw NDJSON 약 1.9MB, 재구성된 답변 텍스트 3,272자)
+
+**참고(운영 주의)**: 테스트 중 Vane의 `GET /api/config`가 인증 없이 설정된 API 키를 평문으로 그대로 반환하는 것을 확인. 검색해보니 이미 **CVE-2026-9371**(CVSS 7.5 High, [ItzCrazyKns/Vane#1122](https://github.com/ItzCrazyKns/Vane/issues/1122))로 등록된 Vane 자체의 미패치 취약점 — 이 repo 코드와 무관. 메인테이너 권장 대응(공개 접근 불필요 시 `127.0.0.1` 바인딩 또는 인증된 리버스 프록시)에 따라 `docker-compose.yml`의 vane 포트를 `"127.0.0.1:3000:3000"`으로 제한(로컬 네트워크 내 다른 기기의 접근 차단, 컨테이너 간 통신은 영향 없음 확인). Railway 배포(6단계) 시에도 Vane에 공개 도메인을 절대 부여하지 않고 내부 연결 전용으로 유지. 로컬 데모 키는 별도로 로테이션 권장.
 
 ## 3단계 — 파싱 모듈 (XPath / 텍스트 분석)
 
