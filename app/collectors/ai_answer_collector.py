@@ -38,6 +38,24 @@ BACKOFF_BASE_SECONDS = 2
 BACKOFF_MAX_SECONDS = 60
 RESPONSE_TIMEOUT_SECONDS = 90
 
+# Vane의 SSE 응답(Content-Type: text/event-stream)에는 charset이 없어, Chrome이
+# Network.getResponseBody에서 바디를 텍스트로 줄 때 WHATWG windows-1252로 원본
+# UTF-8 바이트를 잘못 해석해 디코딩한다(실측 확인 — 영문은 무피해, 한글은 전부 깨짐).
+# Python 표준 cp1252 코덱은 WHATWG 사양과 달리 0x81/0x8D/0x8F/0x90/0x9D 5개
+# 바이트를 undefined로 두므로, 그 부분만 보정해 원래 UTF-8 바이트로 복원한다.
+_CP1252_UNDEFINED_C1 = {0x81, 0x8D, 0x8F, 0x90, 0x9D}
+
+
+def _fix_chrome_charset_mojibake(text: str) -> str:
+    raw = bytearray()
+    for ch in text:
+        code_point = ord(ch)
+        if code_point in _CP1252_UNDEFINED_C1:
+            raw.append(code_point)
+        else:
+            raw += ch.encode("cp1252")
+    return raw.decode("utf-8")
+
 
 @dataclass
 class CollectedAnswer:
@@ -100,7 +118,7 @@ async def _submit_and_capture(page: Page, cdp: CDPSession, query_text: str) -> s
     await asyncio.wait_for(finished.wait(), timeout=RESPONSE_TIMEOUT_SECONDS)
 
     body = await cdp.send("Network.getResponseBody", {"requestId": target_request_id})
-    return body.get("body", "")
+    return _fix_chrome_charset_mojibake(body.get("body", ""))
 
 
 async def collect_answer(query_id: int, query_text: str) -> CollectedAnswer:
