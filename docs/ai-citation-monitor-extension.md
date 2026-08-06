@@ -131,6 +131,7 @@ INSERT INTO queries (category_id, text) VALUES
 - [x] CDP 세션 연결, `Network.enable` — **당초 계획했던 `Network.eventSourceMessageReceived` 구독은 실제로 발동하지 않음을 확인, 방식 재정정**
   - 실측 결과 Vane의 스트리밍 요청은 네이티브 `EventSource`가 아니라 **`POST` + `fetch()` 기반 스트림**(POST라 애초에 native EventSource 사용 불가)이라, Chrome이 이를 "eventsource" 리소스로 인식하지 않아 `Network.eventSourceMessageReceived`가 전혀 발동하지 않음.
   - 대신 `Network.responseReceived`로 `/api/chat` 요청을 매칭 → `Network.loadingFinished` 대기 → `Network.getResponseBody`로 스트림 종료 후 전체 원본(NDJSON)을 가져오는 방식으로 우회.
+  - **실측 추가 발견(3단계 파싱 검증 중 발견, 소급 수정)**: Vane의 `/api/chat` 응답 헤더에 `Content-Type: text/event-stream`만 있고 charset이 없어, Chrome이 `Network.getResponseBody`로 바디를 텍스트로 줄 때 원본 UTF-8 바이트를 WHATWG `windows-1252`로 잘못 해석해 디코딩함(영문은 무피해, 한글만 전부 mojibake로 깨짐 — 브랜드 매칭이 전부 실패해 발견). `_fix_chrome_charset_mojibake()`로 windows-1252 디코딩을 역산해 원래 UTF-8 바이트로 복원하는 보정을 `_submit_and_capture()`에 추가해 해결.
 - [x] 원본 이벤트 청크 누적 → 최종 응답 텍스트 재구성 (`_reconstruct_answer()`)
   - 응답은 줄바꿈 구분 JSON(NDJSON). `type:"block", block.type:"text"`로 답변 블록이 생성된 뒤, 이어지는 `updateBlock`(`path:"/data"`)들은 매번 "지금까지 누적된 전체 텍스트"로 교체(replace)되는 방식이라, **마지막 값만 취하면 최종 답변**이 됨(델타 병합 불필요).
 - [x] User-Agent 로테이션(`USER_AGENTS` 목록에서 컨텍스트별 랜덤 선택), 요청 간 랜덤 딜레이(3~8초) 적용
@@ -142,10 +143,18 @@ INSERT INTO queries (category_id, text) VALUES
 
 ## 3단계 — 파싱 모듈 (XPath / 텍스트 분석)
 
-- [ ] DOM 렌더링 결과면 XPath로 리스트/카드 구조 파싱
-- [ ] 순수 텍스트면 `brand_alias` 기반 키워드 매칭 (해당 브랜드의 category_id로 스코프 한정)
-- [ ] `mention_rank` 계산 (텍스트 내 등장 순서)
-- [ ] 결과를 `citations`에 저장 (query_id, brand_id 참조)
+구현: `app/collectors/citation_parser.py`(순수 파싱 함수) + `worker/citation_collection.py`(수집→파싱→저장 오케스트레이션)
+
+- [x] DOM 렌더링 결과면 XPath로 리스트/카드 구조 파싱 — **해당 없음으로 판정**. 2단계에서 이미 DOM이 아닌 CDP 네트워크 바디(NDJSON)에서 답변 텍스트를 직접 재구성하므로 렌더링된 DOM 자체를 파싱할 필요가 없어짐.
+- [x] 순수 텍스트면 `brand_alias` 기반 키워드 매칭 (해당 브랜드의 category_id로 스코프 한정) — `parse_citations()`, 대소문자 무시 정규식 매칭
+- [x] `mention_rank` 계산 (텍스트 내 등장 순서) — 브랜드별 최초 매칭 위치 기준 정렬
+- [x] 결과를 `citations`에 저장 (query_id, brand_id 참조) — `collect_and_save_citations()`, `response_raw`는 브랜드당 중복 저장을 피하기 위해 원본 NDJSON이 아닌 재구성된 최종 답변 텍스트로 저장
+
+**실측 이슈 및 대응** (첫 실행 시 10개 질의 전부 `mentioned=false`로 나와 원인 2가지를 순서대로 발견/수정):
+1. 1단계 seed 시 `brand_alias`를 국내 관용 표기(맥북, 그램, 갤럭시북 등)로만 등록했으나, 실제 Vane 답변(GPT-4.1-mini)은 Apple/Lenovo/ASUS/Samsung 등 영문 국제 브랜드명으로 답하는 경우가 많음 → `seed_citation_data.py`의 `aliases`에 영문 별칭 추가 + 파서 매칭을 대소문자 무시로 변경.
+2. 영문 별칭 보강 후에도 한글 브랜드명(삼성, 그램 등)은 여전히 안 잡힘 → 근본 원인은 2단계 `_submit_and_capture()`의 charset 미스디코딩 버그(위 2단계 항목 참고)였음. 수정 후 재수집하니 한글 브랜드도 정상 매칭됨.
+
+**완료 기준**: 브랜드 5개 × 질의 10개 조합에 대해 정확히 기록됨 — ✅ 확인 완료 (노트북 카테고리, tenant_1_db citations 50 rows, 질의별 2~4개 브랜드 mentioned=true, mention_rank·context_snippet 모두 한글 정상 표시로 등장 순서와 일치)
 
 **응답 예시** (질의: "출장용으로 가벼운 노트북 추천해줘"):
 
