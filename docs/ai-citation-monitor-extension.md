@@ -181,11 +181,14 @@ INSERT INTO queries (category_id, text) VALUES
 
 ## 4단계 — 분석 모듈
 
-- [ ] `citation_context.py` 작성 (기존 OpenAI 연동 방식 참고)
-- [ ] 언급 문맥 긍정/중립/부정 분류 (OpenAI)
-- [ ] pgvector로 유사 질의 클러스터링
+구현: `app/analysis/citation_context.py`(순수 OpenAI 연동 함수) + `worker/citation_analysis.py`(오케스트레이션)
 
-**완료 기준**: 인용 건별 맥락 라벨 조회 가능
+- [x] `citation_context.py` 작성 — `worker/analytics.py`(감성분류)·`worker/embedding.py`(임베딩) 기존 패턴 재사용. `classify_context_sentiment()`, `embed_query_text()`. API 키 미설정 시 dev dummy 응답(neutral / zero vector) 반환.
+- [x] 언급 문맥 긍정/중립/부정 분류 (OpenAI, `gpt-4o-mini`) — `citations.sentiment` 컬럼 추가, `mentioned=true`이고 `sentiment IS NULL`인 row만 대상으로 분류·저장 (`classify_pending_citations()`)
+- [x] pgvector로 유사 질의 클러스터링 — `queries.embedding` 컬럼(Vector(1536)) 추가, `embed_pending_queries()`로 active 질의 임베딩 생성 후 `find_similar_queries()`가 `app/api/insights.py`의 `/search`와 동일한 `<=>` 코사인 유사도 SQL 패턴으로 유사 질의 조회
+- [x] `app/core/db.py`의 `create_tenant_db()` / `migrate_all_tenants()`에 신규 컬럼 2건(`queries.embedding`, `citations.sentiment`) idempotent `ALTER TABLE ADD COLUMN IF NOT EXISTS` 반영 (기존 reviews/weekly_reports 패턴과 동일)
+
+**완료 기준**: 인용 건별 맥락 라벨 조회 가능 — ✅ 확인 완료 (tenant_1_db citations 29건 감성 분류: neutral 26 / positive 2 / negative 1 — `context_snippet`이 대부분 마크다운 헤더 형태("### 2. Apple MacBook Air (M2)")라 neutral 비중이 높은 것은 3단계 파싱 특성상 정상. queries 20건 임베딩 생성 후 `find_similar_queries()`로 청소기 카테고리 내 유사 질의 클러스터링 확인 — 예: "무선 청소기 추천해줘" ↔ "가성비 좋은 무선청소기 추천해줘" 유사도 0.759)
 
 ## 5단계 — 스케줄링 & 모니터링
 

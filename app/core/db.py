@@ -60,6 +60,12 @@ async def create_tenant_db(tenant_id: int) -> None:
         await conn.execute(
             text("ALTER TABLE weekly_reports ADD COLUMN IF NOT EXISTS mail_sent_at TIMESTAMPTZ")
         )
+        await conn.execute(
+            text("ALTER TABLE queries ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+        )
+        await conn.execute(
+            text("ALTER TABLE citations ADD COLUMN IF NOT EXISTS sentiment VARCHAR(20)")
+        )
     logger.info("Tables ready in %s", db_name)
 
 
@@ -106,6 +112,12 @@ async def migrate_all_tenants() -> None:
                 )
                 await conn.execute(
                     text("ALTER TABLE weekly_reports ADD COLUMN IF NOT EXISTS mail_sent_at TIMESTAMPTZ")
+                )
+                await conn.execute(
+                    text("ALTER TABLE queries ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+                )
+                await conn.execute(
+                    text("ALTER TABLE citations ADD COLUMN IF NOT EXISTS sentiment VARCHAR(20)")
                 )
             logger.info("Schema migration applied — tenant=%s", tenant_id)
         except Exception:
