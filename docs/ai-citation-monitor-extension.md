@@ -29,9 +29,15 @@ ezyreview/
 ├── frontend/                         (신규 — Next.js 대시보드, Vercel Root Directory 지정)
 │   ├── app/
 │   └── components/
-├── dags/                             (신규 — Airflow DAG 정의)
 └── README.md                         (v2 확장 섹션 하단에 이어붙임)
 ```
+
+**정정 (2026-08-09, CLAUDE.md 결정과 동기화)**: 위 구조에 있던 `dags/`는 CLAUDE.md의
+"Airflow DAG, Grafana, Perplexica(Vane) 등 운영/크롤링 대상 서비스는 별도 Railway 서비스로
+배포하며 이 repo의 코드 구조에는 편입하지 않는다"는 결정(커밋 `67adb3d`, 이 스펙 문서 작성
+전날)과 어긋나 제거함. Airflow DAG 정의는 이 repo 밖 별도 서비스에서 관리한다. 이 repo가
+맡는 부분은 5단계의 실패 재처리(backfill)·알림 로직뿐이며, DAG는 그 로직을 호출(HTTP 트리거
+또는 자체 스케줄)하는 쪽에서 구현한다.
 
 **배포 매핑**:
 
@@ -192,12 +198,26 @@ INSERT INTO queries (category_id, text) VALUES
 
 ## 5단계 — 스케줄링 & 모니터링
 
-- [ ] Airflow DAG 작성 — 매일 1회 전체 질의 세트(카테고리 무관 전체) 실행
-- [ ] 실패 태스크 재처리(backfill)
-- [ ] Grafana 대시보드 — 수집 성공률, 응답 지연, 카테고리별 인용 건수
-- [ ] Google Chat Webhook 알림 (기존 패턴 재사용)
+**범위 정정**: CLAUDE.md 결정(Airflow DAG·Grafana·Vane은 별도 Railway 서비스로 배포하며
+이 repo 코드 구조에는 편입하지 않음, 커밋 `67adb3d`)에 따라 Airflow DAG 정의 파일과
+Grafana 대시보드 설정은 이 repo에 만들지 않는다. 이 repo가 담당하는 건 "매일 1회 무인
+실행"과 "실패 재처리"와 "알림" 로직 자체이며, 무인 실행 트리거는 기존에 이미 쓰고 있는
+Celery beat(`worker/celery_app.py`)로 구현한다 — `nightly-analytics`, `weekly-report`와
+동일한 패턴. (추후 실제 Airflow를 붙이게 되면 Celery beat 대신 6단계에서 추가할 API
+엔드포인트를 HTTP로 트리거하는 방식으로 교체 가능.)
 
-**완료 기준**: DAG 무인 실행, 실패 시 알림 확인
+구현: `worker/citation_collection.py`(수집+backfill 오케스트레이션) + `worker/citation_notify.py`(알림) + `worker/tasks.py`/`worker/celery_app.py`(스케줄링)
+
+- [x] 매일 1회 전체 질의 세트 실행 — `collect_citations_task`, Celery beat로 매일 새벽 3시(KST) 트리거 (`nightly-analytics`가 새벽 2시라 겹치지 않게 1시간 뒤로 배치)
+- [x] 실패 태스크 재처리(backfill) — `backfill_missing_queries()`: 오늘(KST) citation이 하나도 없는 active 질의만 골라 재수집. `collect_and_save_citations()`의 질의별 수집 로직을 `_collect_and_save_for_query()`로 추출해 공유
+- [x] Google Chat Webhook 알림 — `citation_notify.py`의 `notify_google_chat()`. `GOOGLE_CHAT_WEBHOOK_URL` 미설정 시 스킵(기존 SendGrid/Gmail 옵셔널 프로바이더 패턴과 동일), `run_daily_collection()` 종료 시 저장 건수/실패 질의 요약을 발송
+- [ ] Grafana 대시보드 — 위 범위 정정에 따라 별도 Railway 서비스에서 관리, 이 repo 작업 범위 아님
+
+**완료 기준**: DAG 무인 실행, 실패 시 알림 확인 → repo 범위 기준으로 재해석해 확인 완료
+- `backfill_missing_queries()` 단독 실행 테스트: 20개 active 질의(노트북 10 + 청소기 10) 전체 실제 재수집 성공 (citations 100건 저장, 실패 0건). 도중 `query_id=11` 1차 시도가 실패했으나 2단계에서 만든 내장 재시도(최대 3회, 지수 백오프)로 자동 성공 — 재처리 경로가 실제로 작동함을 확인
+- 같은 함수를 다시 실행하면 "오늘 이미 수집됨"으로 판정해 0건 처리 — 멱등성 확인
+- `notify_google_chat()`: `GOOGLE_CHAT_WEBHOOK_URL` 미설정 상태에서 정상적으로 스킵(`False` 반환, 예외 미전파) 확인. 실제 웹훅 URL을 발급받아 전송 성공까지 확인하지는 않음 — 발급 시 SendGrid/Gmail과 동일한 "설정하면 붙는" 구조라 별도 코드 변경 없이 동작할 것으로 예상
+- Celery beat 스케줄 등록 확인: `docker compose exec worker python -c "from worker.celery_app import celery_app; print(celery_app.conf.beat_schedule)"` → `collect-citations` 항목 새벽 3시 crontab으로 정상 등록
 
 ## 6단계 — 백엔드 배포 (Railway)
 

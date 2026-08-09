@@ -20,6 +20,12 @@ celery_app.conf.update(
             "task": "worker.tasks.nightly_analytics_task",
             "schedule": crontab(hour=2, minute=0),
         },
+        # 매일 새벽 3시(KST) AI 인용 수집 (Airflow는 별도 Railway 서비스로 분리돼
+        # 이 repo에 편입하지 않음 — Celery beat가 이 repo 쪽 "매일 1회 무인 실행" 담당)
+        "collect-citations": {
+            "task": "worker.tasks.collect_citations_task",
+            "schedule": crontab(hour=3, minute=0),
+        },
         # 매주 월요일 오전 9시(KST) 전 테넌트 주간 리포트 생성
         "weekly-report": {
             "task": "worker.tasks.weekly_report_all_tenants_task",
