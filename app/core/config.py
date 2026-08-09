@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     SENDGRID_API_KEY: str = ""    # SendGrid API 키 (Railway 배포용)
     SENDGRID_FROM_EMAIL: str = "" # SendGrid 발신자 인증 이메일
     VANE_URL: str = "http://vane:3000"  # 셀프호스팅 Perplexica(Vane) — 컨테이너 네트워크 내부 주소
+    GOOGLE_CHAT_WEBHOOK_URL: str = ""  # 인용 수집 결과 알림용 Google Chat 수신 웹훅
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

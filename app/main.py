@@ -8,6 +8,7 @@ from fastapi.openapi.docs import get_redoc_html
 from app.core.config import settings
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.citations import categories_router, citations_router
 from app.api.reviews import router as reviews_router
 from app.api.insights import router as insights_router
 from app.api.tenants import router as tenants_router
@@ -105,6 +106,8 @@ app.include_router(auth_router)
 app.include_router(webhook_router, include_in_schema=False)
 app.include_router(reviews_router)
 app.include_router(insights_router)
+app.include_router(categories_router)
+app.include_router(citations_router)
 app.include_router(admin_router)
 
 

@@ -1,6 +1,7 @@
 # tenant_db 모델 — AI 인용 모니터링 (카테고리/브랜드/질의/인용 수집 결과)
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,6 +65,8 @@ class Query(TenantBase):
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 4단계 — 유사 질의 클러스터링용 임베딩 (text-embedding-3-small)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_kst
     )
@@ -88,6 +91,8 @@ class Citation(TenantBase):
     mentioned: Mapped[bool] = mapped_column(Boolean, nullable=False)
     mention_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     context_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 4단계 — context_snippet 긍정/중립/부정 분류. mentioned=False row는 항상 NULL.
+    sentiment: Mapped[str | None] = mapped_column(String(20), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=now_kst, index=True
     )

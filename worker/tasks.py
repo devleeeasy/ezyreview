@@ -128,6 +128,13 @@ def weekly_report_all_tenants_task(self) -> None:
 
 
 @celery_app.task(bind=True, max_retries=1)
+def collect_citations_task(self) -> None:
+    """매일 새벽 3시 — AI 인용 수집(전체 질의) → 실패분 backfill → 결과 Google Chat 알림."""
+    from worker.citation_collection import run_daily_collection
+    asyncio.run(run_daily_collection())
+
+
+@celery_app.task(bind=True, max_retries=1)
 def nightly_analytics_task(self) -> None:
     """매일 새벽 2시 — 모든 활성 테넌트의 미분석 리뷰 일괄 분석 실행."""
     import asyncio as _asyncio
