@@ -221,9 +221,19 @@ Celery beat(`worker/celery_app.py`)로 구현한다 — `nightly-analytics`, `we
 
 ## 6단계 — 백엔드 배포 (Railway)
 
-- [ ] `/citations`, `/categories` 조회 엔드포인트 추가
-- [ ] Perplexica(Vane), Airflow, Grafana 별도 서비스로 배포
-- [ ] Dockerfile에 `playwright install --with-deps` 반영
+**범위 정정**: 실제 Railway 배포(계정·과금이 걸린 외부 인프라 작업)는 세션 내에서 자동
+진행하지 않는다. 이번 단계에서는 repo 코드로 할 수 있는 조회 엔드포인트만 구현하고,
+배포 자체는 별도로 진행한다.
+
+구현: `app/api/citations.py` (`categories_router`, `citations_router`), `app/main.py`에 등록
+
+- [x] `/citations`, `/categories` 조회 엔드포인트 추가
+  - `GET /categories` — 카테고리 + 소속 브랜드 목록 (7단계 프론트엔드 드롭다운용)
+  - `GET /citations` — category_id/brand_id/mentioned/sentiment 필터 + limit/offset 페이지네이션. `app/api/insights.py`의 `/reviews`(`func.count()` 서브쿼리 + JWT 인증) 패턴 그대로 재사용
+- [ ] Perplexica(Vane), Airflow, Grafana 별도 서비스로 배포 — 이 repo 작업 범위 아님(실제 Railway 배포는 별도 진행)
+- [x] Dockerfile에 `playwright install --with-deps` 반영 — 2단계에서 이미 반영 완료, 추가 작업 없음
+
+**완료 기준(repo 범위로 재해석)**: API 정상 응답 — ✅ 확인 완료. `docker compose build/up api` 재기동 후 JWT 발급(`POST /auth/token`) → `GET /categories`(카테고리 2건, 브랜드 각 5개 정상 반환) → `GET /citations?mentioned=true`(total 73건) → `GET /citations?sentiment=positive`(2건, 필터 정상 동작) 실제 호출로 확인. `/openapi.json`에 두 경로 정상 노출.
 
 **완료 기준**: Railway 배포 후 API 정상 응답, Perplexica/Airflow/Grafana 정상 접속
 
